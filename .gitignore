@@ -1,0 +1,28 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE / editor
+.idea/
+.vscode/
+
+# Training outputs and model checkpoints
+outputs/
+*.pt
+*.pth
+*.ckpt
+
+# Plots, logs, and temporary experiment artifacts
+*.log
+*.tmp
+smoke_runs/
+
+# OS files
+.DS_Store
+Thumbs.db

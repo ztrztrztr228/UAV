@@ -177,7 +177,7 @@ class UAVPathPlanningEnv:
         reward -= self.config.altitude_penalty_scale * float(altitude_ratio)
 
         return float(reward)
-
+###状态空间
     def _get_state(self) -> np.ndarray:
         """构造 40 维三维状态向量，并进行归一化。"""
         delta = self.goal - self.position

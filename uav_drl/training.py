@@ -23,7 +23,7 @@ except ImportError:  # pragma: no cover - tqdm 是可选依赖
 class TrainHistory:
     """训练过程记录，用于画图和分析收敛情况。"""
 
-    episode_rewards: list[float] = field(default_factory=list)
+    episode_rewards: list[float] = field(default_factory=list)#创建每步的奖励列表
     episode_lengths: list[int] = field(default_factory=list)
     successes: list[bool] = field(default_factory=list)
     collisions: list[bool] = field(default_factory=list)
@@ -40,7 +40,7 @@ def epsilon_by_episode(
 ) -> float:
     """根据 episode 编号计算当前探索率 epsilon。"""
     return float(epsilon_end + (epsilon_start - epsilon_end) * math.exp(-episode / epsilon_decay))
-
+#随机探索随回合减小
 
 def train_dqn(
     env: UAVPathPlanningEnv,
@@ -53,6 +53,7 @@ def train_dqn(
     start: Sequence[float] | None = None,
     goal: Sequence[float] | None = None,
     seed: int = DEFAULT_SEED,
+    episode_offset: int = 0,
 ) -> TrainHistory:
     """训练 DQN 智能体。
 
@@ -66,18 +67,19 @@ def train_dqn(
 
     global_step = 0
     for episode in iterator:
-        state = env.reset(start=start, goal=goal, seed=seed + episode)
-        epsilon = epsilon_by_episode(episode, epsilon_start, epsilon_end, epsilon_decay)
+        absolute_episode = episode_offset + episode
+        state = env.reset(start=start, goal=goal, seed=seed + absolute_episode)
+        epsilon = epsilon_by_episode(absolute_episode, epsilon_start, epsilon_end, epsilon_decay)
         total_reward = 0.0
         episode_losses: list[float] = []
-        final_info: dict[str, object] = {}
+        final_info: dict[str, object] = {}#每回合重置
 
-        while True:
-            action = agent.select_action(state, epsilon=epsilon)
-            next_state, reward, done, info = env.step(action)
-            agent.replay_buffer.push(state, action, reward, next_state, done)
+        while True:#一个回合
+            action = agent.select_action(state, epsilon=epsilon)#agent选动作
+            next_state, reward, done, info = env.step(action)#动作导致下一步状态
+            agent.replay_buffer.push(state, action, reward, next_state, done)#存入经验池
 
-            loss = agent.learn()
+            loss = agent.learn()#更新网络
             if loss is not None:
                 episode_losses.append(loss)
 
@@ -86,7 +88,7 @@ def train_dqn(
             global_step += 1
 
             if global_step % target_update_interval == 0:
-                agent.update_target_network()
+                agent.update_target_network()#隔一段时间更新目标网络
 
             if done:
                 final_info = info
@@ -99,9 +101,9 @@ def train_dqn(
         history.collisions.append(bool(final_info.get("collision", False)))
         history.final_distances.append(float(final_info.get("distance_to_goal", env.distance_to_goal())))
         history.losses.append(mean_loss)
-        history.epsilons.append(epsilon)
+        history.epsilons.append(epsilon)#参数存入列表
 
-        if tqdm is not None and hasattr(iterator, "set_postfix"):
+        if tqdm is not None and hasattr(iterator, "set_postfix"):#显示进度条
             recent_success = np.mean(history.successes[-50:]) if history.successes else 0.0
             iterator.set_postfix(
                 reward=f"{np.mean(history.episode_rewards[-20:]):.1f}",

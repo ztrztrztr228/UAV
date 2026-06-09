@@ -18,11 +18,13 @@
 from __future__ import annotations
 
 import argparse
+import random
 import time
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import torch
 
 from uav_drl.actions import ACTION_NAMES
 from uav_drl.agent import DQNAgent
@@ -36,7 +38,7 @@ from uav_drl.visualization import plot_training, plot_trajectory, save_trajector
 def parse_args() -> argparse.Namespace:
     """定义命令行参数。"""
     parser = argparse.ArgumentParser(description="Train a 3D DQN UAV path planner.")
-    parser.add_argument("--episodes", type=int, default=600)
+    parser.add_argument("--episodes", type=int, default=1000)
     parser.add_argument("--eval-episodes", type=int, default=5)
     parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
@@ -109,6 +111,32 @@ def make_run_output_dir(base_dir: Path) -> Path:
     return run_dir
 
 
+def capture_rng_state() -> dict[str, object]:
+    """Capture random-generator state for exact checkpoint resume."""
+    state: dict[str, object] = {
+        "python": random.getstate(),
+        "numpy": np.random.get_state(),
+        "torch": torch.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        state["torch_cuda"] = torch.cuda.get_rng_state_all()
+    return state
+
+
+def restore_rng_state(state: dict[str, object] | None) -> None:
+    """Restore random-generator state from a checkpoint when available."""
+    if not state:
+        return
+    if "python" in state:
+        random.setstate(state["python"])
+    if "numpy" in state:
+        np.random.set_state(state["numpy"])
+    if "torch" in state:
+        torch.set_rng_state(state["torch"])
+    if torch.cuda.is_available() and "torch_cuda" in state:
+        torch.cuda.set_rng_state_all(state["torch_cuda"])
+
+
 def main() -> None:
     """组织完整三维训练和评估流程。"""
     args = parse_args()
@@ -150,9 +178,13 @@ def main() -> None:
     if resume_model is None and not args.fresh_start and args.save_model and args.save_model.exists():
         resume_model = args.save_model
 
+    trained_episodes = 0
     if resume_model:
-        agent.load(resume_model)
+        checkpoint = agent.load(resume_model)
+        trained_episodes = int(checkpoint.get("trained_episodes", 0))
+        restore_rng_state(checkpoint.get("rng_state"))
         print(f"Loaded model from {resume_model}")
+        print(f"Resuming from episode {trained_episodes}, replay_buffer={len(agent.replay_buffer)}")
     print(f"Run outputs will be saved to {run_output_dir}")
 
     history = TrainHistory()
@@ -168,13 +200,23 @@ def main() -> None:
             start=start,
             goal=goal,
             seed=args.seed,
+            episode_offset=trained_episodes,
         )
+        trained_episodes += args.episodes
         if args.save_model:
             args.save_model.parent.mkdir(parents=True, exist_ok=True)
-            agent.save(args.save_model, config=config)
+            checkpoint_state = {
+                "trained_episodes": trained_episodes,
+                "epsilon_start": args.epsilon_start,
+                "epsilon_end": args.epsilon_end,
+                "epsilon_decay": args.epsilon_decay,
+                "seed": args.seed,
+                "rng_state": capture_rng_state(),
+            }
+            agent.save(args.save_model, config=config, extra_state=checkpoint_state)
             print(f"Saved model to {args.save_model}")
             run_model_path = run_output_dir / args.save_model.name
-            agent.save(run_model_path, config=config)
+            agent.save(run_model_path, config=config, extra_state=checkpoint_state)
             print(f"Saved run model to {run_model_path}")
 
         if not args.no_plots:

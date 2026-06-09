@@ -30,6 +30,19 @@ class ReplayBuffer:
     def __len__(self) -> int:
         return len(self.buffer)
 
+    def state_dict(self) -> dict[str, object]:
+        """Return serializable replay-buffer state for checkpoint resume."""
+        return {
+            "capacity": self.buffer.maxlen,
+            "items": list(self.buffer),
+        }
+
+    def load_state_dict(self, state: dict[str, object]) -> None:
+        """Restore replay-buffer contents from a checkpoint."""
+        capacity = int(state.get("capacity") or self.buffer.maxlen or 0)
+        items = state.get("items", [])
+        self.buffer = deque(items, maxlen=capacity)
+
     def push(
         self,
         state: np.ndarray,
@@ -138,20 +151,28 @@ class DQNAgent:
         """同步目标网络参数。"""
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
-    def save(self, path: str | Path, config: UAVEnvConfig | None = None) -> None:
+    def save(
+        self,
+        path: str | Path,
+        config: UAVEnvConfig | None = None,
+        extra_state: dict[str, object] | None = None,
+    ) -> None:
         """保存模型和环境配置。"""
         payload = {
             "policy_net": self.policy_net.state_dict(),
             "target_net": self.target_net.state_dict(),
             "optimizer": self.optimizer.state_dict(),
+            "replay_buffer": self.replay_buffer.state_dict(),
             "action_dim": self.action_dim,
             "gamma": self.gamma,
             "batch_size": self.batch_size,
             "config": config_to_dict(config) if config is not None else None,
         }
+        if extra_state:
+            payload.update(extra_state)
         torch.save(payload, path)
 
-    def load(self, path: str | Path) -> None:
+    def load(self, path: str | Path) -> dict[str, object]:
         """加载已训练模型。"""
         try:
             checkpoint = torch.load(path, map_location=self.device, weights_only=False)
@@ -161,3 +182,6 @@ class DQNAgent:
         self.target_net.load_state_dict(checkpoint.get("target_net", checkpoint["policy_net"]))
         if "optimizer" in checkpoint:
             self.optimizer.load_state_dict(checkpoint["optimizer"])
+        if "replay_buffer" in checkpoint:
+            self.replay_buffer.load_state_dict(checkpoint["replay_buffer"])
+        return checkpoint

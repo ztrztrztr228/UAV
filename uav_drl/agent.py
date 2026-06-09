@@ -38,13 +38,13 @@ class ReplayBuffer:
         }
 
     def load_state_dict(self, state: dict[str, object]) -> None:
-        """Restore replay-buffer contents from a checkpoint."""
+   #从上次重新加载经验池
         capacity = int(state.get("capacity") or self.buffer.maxlen or 0)
         items = state.get("items", [])
         self.buffer = deque(items, maxlen=capacity)
 
     def push(
-        self,
+        self,#存入经验
         state: np.ndarray,
         action: int,
         reward: float,
@@ -55,7 +55,7 @@ class ReplayBuffer:
         self.buffer.append((state, int(action), float(reward), next_state, bool(done)))
 
     def sample(
-        self,
+        self,#取出经验
         batch_size: int,
         device: torch.device,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -101,8 +101,8 @@ class DQNAgent:
         self.batch_size = batch_size
         self.grad_clip = grad_clip
 
-        self.policy_net = QNetwork(state_dim, action_dim, hidden_size).to(self.device)
-        self.target_net = QNetwork(state_dim, action_dim, hidden_size).to(self.device)
+        self.policy_net = QNetwork(state_dim, action_dim, hidden_size).to(self.device)##创建Q网络
+        self.target_net = QNetwork(state_dim, action_dim, hidden_size).to(self.device)##创建目标网络
         self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=lr)
         self.replay_buffer = ReplayBuffer(buffer_size)
         self.update_target_network()
@@ -116,36 +116,36 @@ class DQNAgent:
             return random.randrange(self.action_dim)
         self.policy_net.eval()
         with torch.no_grad():
-            state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
-            q_values = self.policy_net(state_tensor)
-            return int(q_values.argmax(dim=1).item())
+            state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)#计算状态向量
+            q_values = self.policy_net(state_tensor)#输入状态向量给policy network，得到各动作价值
+            return int(q_values.argmax(dim=1).item())#选择该状态下价值最大的动作，此即策略
 
     def learn(self) -> float | None:
-        """从经验回放池采样并更新一次 Q 网络。"""
+        """从经验回放池采batch size个样本并用他们更新一次 Q 网络。"""
         if len(self.replay_buffer) < self.batch_size:
             return None
 
         self.policy_net.train()
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(
-            self.batch_size,
+            self.batch_size,#从经验池取样
             self.device,
         )
 
         # 当前动作价值 Q(s,a)。
         q_values = self.policy_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
 
-        with torch.no_grad():
+        with torch.no_grad():#计算target
             # Double DQN 目标：在线网络选动作，目标网络估值。
             next_actions = self.policy_net(next_states).argmax(dim=1, keepdim=True)
-            next_q_values = self.target_net(next_states).gather(1, next_actions).squeeze(1)
+            next_q_values = self.target_net(next_states).gather(1, next_actions).squeeze(1)#估计下一步最佳动作价值
             targets = rewards + self.gamma * (1.0 - dones) * next_q_values
 
-        loss = F.smooth_l1_loss(q_values, targets)
+        loss = F.smooth_l1_loss(q_values, targets)#计算损失函数
         self.optimizer.zero_grad()
-        loss.backward()
+        loss.backward()#计算梯度下降
         nn.utils.clip_grad_norm_(self.policy_net.parameters(), self.grad_clip)
-        self.optimizer.step()
-        return float(loss.detach().cpu().item())
+        self.optimizer.step()#更新网络
+        return float(loss.detach().cpu().item())##返回loss值
 
     def update_target_network(self) -> None:
         """同步目标网络参数。"""

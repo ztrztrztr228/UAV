@@ -38,7 +38,7 @@ from uav_drl.visualization import plot_training, plot_trajectory, save_trajector
 def parse_args() -> argparse.Namespace:
     """定义命令行参数。"""
     parser = argparse.ArgumentParser(description="Train a 3D DQN UAV path planner.")
-    parser.add_argument("--episodes", type=int, default=1000)
+    parser.add_argument("--episodes", type=int, default=100)
     parser.add_argument("--eval-episodes", type=int, default=5)
     parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)

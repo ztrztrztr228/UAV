@@ -5,7 +5,7 @@
 ## 项目结构
 
 ```text
-uav_drl_path_planning.py       # 主函数和命令行入口
+uav_drl_path_planning.py       # 主函数和命令行的入口
 uav_drl/
   actions.py                   # 三维动作空间，26 个方向 + hover
   config.py                    # 三维地图、建筑物、环境参数

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -68,6 +69,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=Path("outputs"))
     parser.add_argument("--save-model", type=Path, default=Path("outputs/uav_dqn.pt"))
     parser.add_argument("--load-model", type=Path)
+    parser.add_argument("--fresh-start", action="store_true", help="do not auto-load the previous checkpoint")
     parser.add_argument("--no-plots", action="store_true")
     parser.add_argument("--visualize", action="store_true")
     parser.add_argument("--device", default=None, help="cpu, cuda, or auto when omitted")
@@ -86,6 +88,27 @@ def make_config(args: argparse.Namespace) -> UAVEnvConfig:
     )
 
 
+def ground_center_start(config: UAVEnvConfig) -> tuple[float, float, float]:
+ #起点设置为地图中央地面
+    return (
+        config.map_width / 2.0,
+        config.map_height / 2.0,
+        config.uav_radius + 1e-3,
+    )
+
+
+def make_run_output_dir(base_dir: Path) -> Path:
+  #每次单独保存输出结果
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = base_dir / f"run_{stamp}"
+    suffix = 1
+    while run_dir.exists():
+        run_dir = base_dir / f"run_{stamp}_{suffix:02d}"
+        suffix += 1
+    run_dir.mkdir(parents=True, exist_ok=False)
+    return run_dir
+
+
 def main() -> None:
     """组织完整三维训练和评估流程。"""
     args = parse_args()
@@ -94,12 +117,15 @@ def main() -> None:
 
     output_dir: Path = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    default_z = min(max(args.default_altitude, 1.0), args.map_altitude - 1.0)
-    start = optional_point_3d(args.start_x, args.start_y, args.start_z, "start", default_z)
-    goal = optional_point_3d(args.target_x, args.target_y, args.target_z, "target", default_z)
+    run_output_dir = make_run_output_dir(output_dir)
 
     config = make_config(args)
+    default_z = min(max(args.default_altitude, 1.0), args.map_altitude - 1.0)
+    start = optional_point_3d(args.start_x, args.start_y, args.start_z, "start", default_z)
+    if start is None:
+        start = ground_center_start(config)
+    goal = optional_point_3d(args.target_x, args.target_y, args.target_z, "target", default_z)
+
     env = UAVPathPlanningEnv(config=config, seed=args.seed)
     agent = DQNAgent(
         state_dim=env.state_dim,
@@ -120,9 +146,14 @@ def main() -> None:
         f"obstacles={len(env.config.obstacles)}"
     )
 
-    if args.load_model:
-        agent.load(args.load_model)
-        print(f"Loaded model from {args.load_model}")
+    resume_model = args.load_model
+    if resume_model is None and not args.fresh_start and args.save_model and args.save_model.exists():
+        resume_model = args.save_model
+
+    if resume_model:
+        agent.load(resume_model)
+        print(f"Loaded model from {resume_model}")
+    print(f"Run outputs will be saved to {run_output_dir}")
 
     history = TrainHistory()
     if not args.skip_train and args.episodes > 0:
@@ -142,9 +173,12 @@ def main() -> None:
             args.save_model.parent.mkdir(parents=True, exist_ok=True)
             agent.save(args.save_model, config=config)
             print(f"Saved model to {args.save_model}")
+            run_model_path = run_output_dir / args.save_model.name
+            agent.save(run_model_path, config=config)
+            print(f"Saved run model to {run_model_path}")
 
         if not args.no_plots:
-            plot_training(history, output_dir / "training_curve.png")
+            plot_training(history, run_output_dir / "training_curve.png")
 
     results, best_trajectory = evaluate_agent(
         env=env,
@@ -156,10 +190,10 @@ def main() -> None:
     )
 
     if best_trajectory:
-        save_trajectory_csv(best_trajectory, output_dir / "best_trajectory.csv")
+        save_trajectory_csv(best_trajectory, run_output_dir / "best_trajectory.csv")
 
     if (args.visualize or not args.no_plots) and best_trajectory:
-        plot_trajectory(env, best_trajectory, output_dir / "best_trajectory.png")
+        plot_trajectory(env, best_trajectory, run_output_dir / "best_trajectory.png")
 
     if results:
         successes = [bool(result.get("success", False)) for result in results]

@@ -33,7 +33,7 @@ class UAVPathPlanningEnv:
     """
 
     def __init__(self, config: UAVEnvConfig | None = None, seed: int = DEFAULT_SEED) -> None:
-        self.config = config or UAVEnvConfig()
+        self.config = config or UAVEnvConfig()#构造函数
         self.rng = np.random.default_rng(seed)
 
         self.num_actions = len(ACTION_NAMES)
@@ -54,7 +54,7 @@ class UAVPathPlanningEnv:
         self.done = False
         self.trajectory: list[np.ndarray] = []
         self.reset()
-
+####新回合做初始化
     def reset(
         self,
         start: Sequence[float] | None = None,
@@ -79,16 +79,16 @@ class UAVPathPlanningEnv:
         self.done = False
         self.trajectory = [self.position.copy()]
         return self._get_state()
-
+####执行动作
     def step(self, action: int) -> tuple[np.ndarray, float, bool, dict[str, object]]:
         """执行一个三维动作，返回下一状态、奖励、终止标志和调试信息。"""
         if self.done:
             return self._get_state(), 0.0, True, self._info("already_done")
-
+#检查动作是否合理
         action = int(action)
         if not 0 <= action < self.num_actions:
             raise ValueError(f"Action must be in [0, {self.num_actions - 1}], got {action}.")
-
+###做动作
         prev_position = self.position.copy()
         prev_distance = self.distance_to_goal()
         move = ACTION_DIRECTIONS[action] * self.config.step_length
@@ -96,14 +96,14 @@ class UAVPathPlanningEnv:
 
         self.steps += 1
         collision = self._segment_in_collision(prev_position, candidate)
-
+##检测是否碰撞
         if collision:
-            self.done = True
+            self.done = True#碰撞就停
             reward = self.config.collision_penalty
             reward -= self.config.distance_penalty_scale * (prev_distance / self.max_distance)
             info = self._info("collision", collision=True, reward=reward)
             return self._get_state(), float(reward), True, info
-
+##记录轨迹
         self.position = candidate.astype(np.float32)
         self.path_length += float(np.linalg.norm(move))
         self.trajectory.append(self.position.copy())
@@ -111,7 +111,7 @@ class UAVPathPlanningEnv:
         new_distance = self.distance_to_goal()
         progress = prev_distance - new_distance
         reward = self._shaped_reward(action, move, progress, new_distance)
-
+#到终点加分/超时
         reached_goal = new_distance <= self.config.goal_radius
         timeout = self.steps >= self.config.max_steps
         event = "running"
@@ -119,7 +119,7 @@ class UAVPathPlanningEnv:
         if reached_goal:
             self.done = True
             event = "goal"
-            speed_bonus = 1.0 - self.steps / max(1, self.config.max_steps)
+            speed_bonus = 1.0 - self.steps / max(1, self.config.max_steps)#步数少，奖励大
             reward += self.config.goal_reward + 25.0 * max(0.0, speed_bonus)
         elif timeout:
             self.done = True
@@ -139,7 +139,7 @@ class UAVPathPlanningEnv:
     def distance_to_goal(self) -> float:
         """当前无人机到三维目标点的欧氏距离。"""
         return float(np.linalg.norm(self.goal - self.position))
-
+####奖励函数
     def _shaped_reward(
         self,
         action: int,
@@ -215,7 +215,7 @@ class UAVPathPlanningEnv:
                     break
             readings.append(distance / max_range)
         return np.asarray(readings, dtype=np.float32)
-
+####取点
     def _sample_goal_far_from(self, start: np.ndarray) -> np.ndarray:
         """随机采样一个离起点足够远的三维目标点。"""
         for _ in range(10_000):
@@ -245,7 +245,7 @@ class UAVPathPlanningEnv:
         if self._point_in_collision(array):
             raise ValueError(f"{name} point {array.tolist()} is outside the map or inside an obstacle.")
         return array
-
+######碰撞检测
     def _segment_in_collision(self, start: np.ndarray, end: np.ndarray) -> bool:
         """检查一段三维飞行线段是否碰撞。"""
         length = float(np.linalg.norm(end - start))

@@ -7,7 +7,7 @@ import numpy as np
 
 
 def _direction_name(dx: int, dy: int, dz: int) -> str:
-    """把三维方向分量转换成可读动作名称。"""
+    """三维方向分量转换成可读动作名称。"""
     parts: list[str] = []
     if dy > 0:
         parts.append("north")

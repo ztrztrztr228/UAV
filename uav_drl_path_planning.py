@@ -30,7 +30,6 @@ from uav_drl.actions import ACTION_NAMES
 from uav_drl.agent import DQNAgent
 from uav_drl.config import DEFAULT_SEED, UAVEnvConfig
 from uav_drl.environment import UAVPathPlanningEnv
-from uav_drl.trajectory import path_to_timed_trajectory
 from uav_drl.training import TrainHistory, evaluate_agent, train_dqn
 from uav_drl.utils import fix_seed, optional_point_3d
 from uav_drl.validation import save_validation_json, validate_timed_trajectory
@@ -46,8 +45,8 @@ from uav_drl.visualization import (
 
 def parse_args() -> argparse.Namespace:
     """定义命令行参数。"""
-    parser = argparse.ArgumentParser(description="Train a 3D DQN UAV path planner.")
-    parser.add_argument("--episodes", type=int, default=100)
+    parser = argparse.ArgumentParser(description="Train a dynamics-aware 3D DQN UAV trajectory planner.")
+    parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument("--eval-episodes", type=int, default=5)
     parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
@@ -59,9 +58,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=320)
     parser.add_argument("--goal-radius", type=float, default=3.0)
     parser.add_argument("--default-altitude", type=float, default=8.0)
-    parser.add_argument("--trajectory-dt", type=float, default=1.0)
+    parser.add_argument("--trajectory-dt", type=float, default=0.5)
     parser.add_argument("--max-speed", type=float, default=8.0)
     parser.add_argument("--max-acceleration", type=float, default=3.0)
+    parser.add_argument("--max-jerk", type=float, default=12.0)
+    parser.add_argument("--goal-speed-tolerance", type=float, default=1.0)
     parser.add_argument("--smoothing-iterations", type=int, default=1)
     parser.add_argument(
         "--trajectory-deviation-tolerance",
@@ -88,7 +89,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epsilon-decay", type=float, default=350.0)
 
     parser.add_argument("--output-dir", type=Path, default=Path("outputs"))
-    parser.add_argument("--save-model", type=Path, default=Path("outputs/uav_dqn.pt"))
+    parser.add_argument("--save-model", type=Path, default=Path("outputs/uav_dynamics_dqn.pt"))
     parser.add_argument("--load-model", type=Path)
     parser.add_argument("--fresh-start", action="store_true", help="do not auto-load the previous checkpoint")
     parser.add_argument("--no-plots", action="store_true")
@@ -109,6 +110,8 @@ def make_config(args: argparse.Namespace) -> UAVEnvConfig:
         trajectory_dt=args.trajectory_dt,
         max_speed=args.max_speed,
         max_acceleration=args.max_acceleration,
+        max_jerk=args.max_jerk,
+        goal_speed_tolerance=args.goal_speed_tolerance,
         smoothing_iterations=args.smoothing_iterations,
     )
 
@@ -256,16 +259,10 @@ def main() -> None:
 
     if best_trajectory:
         save_trajectory_csv(best_trajectory, run_output_dir / "best_trajectory.csv")
-        timed_trajectory = path_to_timed_trajectory(
-            best_trajectory,
-            dt=config.trajectory_dt,
-            max_speed=config.max_speed,
-            max_acceleration=config.max_acceleration,
-            smoothing_iterations=config.smoothing_iterations,
-        )
+        timed_trajectory = env.timed_trajectory()
         save_timed_trajectory_csv(timed_trajectory, run_output_dir / "best_timed_trajectory.csv")
         deviation_tolerance = (
-            config.step_length
+            1e-4
             if args.trajectory_deviation_tolerance is None
             else args.trajectory_deviation_tolerance
         )
@@ -274,6 +271,12 @@ def main() -> None:
             reference_path=best_trajectory,
             trajectory=timed_trajectory,
             deviation_tolerance=deviation_tolerance,
+            max_speed=config.max_speed,
+            max_acceleration=config.max_acceleration,
+            max_jerk=config.max_jerk,
+            goal=env.goal,
+            goal_radius=config.goal_radius,
+            goal_speed_tolerance=config.goal_speed_tolerance,
         )
         save_validation_json(validation, run_output_dir / "trajectory_validation.json")
         print(
@@ -290,7 +293,9 @@ def main() -> None:
             f"max_deviation={validation.max_deviation:.2f}m, "
             f"mean_deviation={validation.mean_deviation:.2f}m, "
             f"collision_free={validation.collision_free}, "
-            f"within_bounds={validation.within_bounds}"
+            f"within_bounds={validation.within_bounds}, "
+            f"dynamics_consistent={validation.dynamics_consistent}, "
+            f"goal_reached={validation.goal_reached}"
         )
 
     if (args.visualize or not args.no_plots) and best_trajectory:

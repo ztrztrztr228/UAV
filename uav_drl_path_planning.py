@@ -33,9 +33,11 @@ from uav_drl.environment import UAVPathPlanningEnv
 from uav_drl.trajectory import path_to_timed_trajectory
 from uav_drl.training import TrainHistory, evaluate_agent, train_dqn
 from uav_drl.utils import fix_seed, optional_point_3d
+from uav_drl.validation import save_validation_json, validate_timed_trajectory
 from uav_drl.visualization import (
     plot_training,
     plot_trajectory,
+    plot_trajectory_validation,
     plot_trajectory_profiles,
     save_timed_trajectory_csv,
     save_trajectory_csv,
@@ -61,6 +63,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-speed", type=float, default=8.0)
     parser.add_argument("--max-acceleration", type=float, default=3.0)
     parser.add_argument("--smoothing-iterations", type=int, default=1)
+    parser.add_argument(
+        "--trajectory-deviation-tolerance",
+        type=float,
+        default=None,
+        help="maximum allowed distance from timed trajectory samples to the original path",
+    )
 
     parser.add_argument("--start-x", type=float)
     parser.add_argument("--start-y", type=float)
@@ -256,6 +264,18 @@ def main() -> None:
             smoothing_iterations=config.smoothing_iterations,
         )
         save_timed_trajectory_csv(timed_trajectory, run_output_dir / "best_timed_trajectory.csv")
+        deviation_tolerance = (
+            config.step_length
+            if args.trajectory_deviation_tolerance is None
+            else args.trajectory_deviation_tolerance
+        )
+        validation = validate_timed_trajectory(
+            env=env,
+            reference_path=best_trajectory,
+            trajectory=timed_trajectory,
+            deviation_tolerance=deviation_tolerance,
+        )
+        save_validation_json(validation, run_output_dir / "trajectory_validation.json")
         print(
             "timed trajectory: "
             f"samples={len(timed_trajectory.time)}, "
@@ -264,10 +284,25 @@ def main() -> None:
             f"max_speed={timed_trajectory.max_speed:.2f}m/s, "
             f"max_acceleration={timed_trajectory.max_acceleration:.2f}m/s^2"
         )
+        print(
+            "trajectory validation: "
+            f"passed={validation.passed}, "
+            f"max_deviation={validation.max_deviation:.2f}m, "
+            f"mean_deviation={validation.mean_deviation:.2f}m, "
+            f"collision_free={validation.collision_free}, "
+            f"within_bounds={validation.within_bounds}"
+        )
 
     if (args.visualize or not args.no_plots) and best_trajectory:
         plot_trajectory(env, best_trajectory, run_output_dir / "best_trajectory.png")
         plot_trajectory_profiles(timed_trajectory, run_output_dir / "trajectory_profiles.png")
+        plot_trajectory_validation(
+            env,
+            best_trajectory,
+            timed_trajectory,
+            validation,
+            run_output_dir / "trajectory_validation.png",
+        )
 
     if results:
         successes = [bool(result.get("success", False)) for result in results]

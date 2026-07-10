@@ -13,6 +13,7 @@ from .config import BoxObstacle
 from .environment import UAVPathPlanningEnv
 from .training import TrainHistory
 from .trajectory import TimedTrajectory
+from .validation import TrajectoryValidationResult
 
 
 def moving_average(values: Sequence[float], window: int) -> np.ndarray:
@@ -256,3 +257,109 @@ def plot_trajectory_profiles(trajectory: TimedTrajectory, output_path: Path) -> 
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
     print(f"Saved trajectory profile plot to {output_path}")
+
+
+def plot_trajectory_validation(
+    env: UAVPathPlanningEnv,
+    reference_path: Sequence[np.ndarray],
+    trajectory: TimedTrajectory,
+    validation: TrajectoryValidationResult,
+    output_path: Path,
+) -> None:
+    """Plot original path and timed trajectory together for visual validation."""
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+    except ImportError:
+        print("matplotlib is not installed; skip trajectory validation plot.")
+        return
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    reference_points = np.asarray(reference_path, dtype=np.float64)
+    timed_points = np.asarray(trajectory.position, dtype=np.float64)
+    max_point = timed_points[validation.max_deviation_index]
+
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection="3d")
+    ax.set_title(
+        "Trajectory Validation "
+        f"({'PASS' if validation.passed else 'FAIL'}, max error {validation.max_deviation:.2f} m)"
+    )
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_zlabel("z")
+    ax.set_xlim(0, env.config.map_width)
+    ax.set_ylim(0, env.config.map_height)
+    ax.set_zlim(0, env.config.map_altitude)
+
+    for obstacle in env.config.obstacles:
+        poly = Poly3DCollection(
+            _box_faces(obstacle),
+            facecolor="#64748b",
+            edgecolor="#334155",
+            linewidths=0.5,
+            alpha=0.38,
+        )
+        ax.add_collection3d(poly)
+
+    ax.plot(
+        reference_points[:, 0],
+        reference_points[:, 1],
+        reference_points[:, 2],
+        color="#2563eb",
+        linewidth=2.0,
+        label="reference path",
+    )
+    ax.plot(
+        timed_points[:, 0],
+        timed_points[:, 1],
+        timed_points[:, 2],
+        color="#dc2626",
+        linewidth=1.8,
+        label="timed trajectory",
+    )
+    ax.scatter(
+        timed_points[:, 0],
+        timed_points[:, 1],
+        timed_points[:, 2],
+        color="#f97316",
+        s=18,
+        alpha=0.75,
+        label="time samples",
+    )
+    ax.scatter(
+        [max_point[0]],
+        [max_point[1]],
+        [max_point[2]],
+        color="#111827",
+        s=80,
+        marker="x",
+        label="max deviation",
+    )
+    ax.scatter(
+        [reference_points[0, 0]],
+        [reference_points[0, 1]],
+        [reference_points[0, 2]],
+        color="#16a34a",
+        s=70,
+        marker="o",
+        label="start",
+    )
+    ax.scatter(
+        [env.goal[0]],
+        [env.goal[1]],
+        [env.goal[2]],
+        color="#7c3aed",
+        s=95,
+        marker="*",
+        label="goal",
+    )
+    ax.legend(loc="upper right")
+    ax.view_init(elev=24, azim=-55)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    print(f"Saved trajectory validation plot to {output_path}")

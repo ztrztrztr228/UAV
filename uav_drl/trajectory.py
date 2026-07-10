@@ -25,6 +25,44 @@ class TimedTrajectory:
     max_acceleration: float
 
 
+def dynamics_samples_to_trajectory(
+    positions: list[np.ndarray] | np.ndarray,
+    velocities: list[np.ndarray] | np.ndarray,
+    accelerations: list[np.ndarray] | np.ndarray,
+    dt: float,
+) -> TimedTrajectory:
+    """Build a trajectory directly from RL dynamics samples without smoothing."""
+    if dt <= 0.0:
+        raise ValueError("dt must be positive.")
+    position = _as_points(positions)
+    velocity = _as_points(velocities)
+    acceleration = _as_points(accelerations)
+    if not (len(position) == len(velocity) == len(acceleration)):
+        raise ValueError("Position, velocity, and acceleration sample counts must match.")
+    time = np.arange(len(position), dtype=np.float64) * float(dt)
+    segment_lengths = (
+        np.linalg.norm(np.diff(position, axis=0), axis=1)
+        if len(position) > 1
+        else np.asarray([], dtype=np.float64)
+    )
+    path_s = np.concatenate([[0.0], np.cumsum(segment_lengths)])
+    speed = np.linalg.norm(velocity, axis=1)
+    acceleration_norm = np.linalg.norm(acceleration, axis=1)
+    return TimedTrajectory(
+        time=time,
+        position=position,
+        velocity=velocity,
+        acceleration=acceleration,
+        speed=speed,
+        acceleration_norm=acceleration_norm,
+        path_s=path_s,
+        total_time=float(time[-1]) if len(time) else 0.0,
+        total_length=float(path_s[-1]),
+        max_speed=float(speed.max(initial=0.0)),
+        max_acceleration=float(acceleration_norm.max(initial=0.0)),
+    )
+
+
 def _as_points(path: list[np.ndarray] | tuple[np.ndarray, ...] | np.ndarray) -> np.ndarray:
     points = np.asarray(path, dtype=np.float64)
     if points.ndim != 2 or points.shape[1] != 3:

@@ -137,6 +137,8 @@ def evaluate_agent(
     agent.policy_net.eval()
     results: list[dict[str, object]] = []
     best_trajectory: list[np.ndarray] = []
+    best_velocities: list[np.ndarray] = []
+    best_accelerations: list[np.ndarray] = []
     best_start: np.ndarray | None = None
     best_goal: np.ndarray | None = None
     best_score = -float("inf")
@@ -164,6 +166,8 @@ def evaluate_agent(
         if score > best_score:
             best_score = score
             best_trajectory = [point.copy() for point in env.trajectory]
+            best_velocities = [value.copy() for value in env.velocity_trajectory]
+            best_accelerations = [value.copy() for value in env.acceleration_trajectory]
             best_start = env.start.copy()
             best_goal = env.goal.copy()
 
@@ -186,5 +190,11 @@ def evaluate_agent(
     if best_start is not None and best_goal is not None:
         env.start = best_start
         env.goal = best_goal
+        env.trajectory = best_trajectory
+        env.velocity_trajectory = best_velocities
+        env.acceleration_trajectory = best_accelerations
+        env.position = best_trajectory[-1].copy()
+        env.velocity = best_velocities[-1].copy()
+        env.acceleration = best_accelerations[-1].copy()
 
     return results, best_trajectory

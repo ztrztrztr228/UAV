@@ -96,6 +96,7 @@ class DQNAgent:
         device: str | None = None,
     ) -> None:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        self.state_dim = state_dim
         self.action_dim = action_dim
         self.gamma = gamma
         self.batch_size = batch_size
@@ -164,6 +165,7 @@ class DQNAgent:
             "optimizer": self.optimizer.state_dict(),
             "replay_buffer": self.replay_buffer.state_dict(),
             "action_dim": self.action_dim,
+            "state_dim": self.state_dim,
             "gamma": self.gamma,
             "batch_size": self.batch_size,
             "config": config_to_dict(config) if config is not None else None,
@@ -178,7 +180,17 @@ class DQNAgent:
             checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         except TypeError:
             checkpoint = torch.load(path, map_location=self.device)
-        self.policy_net.load_state_dict(checkpoint["policy_net"])
+        if checkpoint.get("state_dim", self.state_dim) != self.state_dim:
+            raise ValueError(
+                "Checkpoint state dimension does not match the dynamics environment. "
+                "Phase-1 checkpoints cannot be loaded in phase 2; train a new model."
+            )
+        try:
+            self.policy_net.load_state_dict(checkpoint["policy_net"])
+        except RuntimeError as exc:
+            raise ValueError(
+                "Checkpoint network shape is incompatible with the phase-2 dynamics model."
+            ) from exc
         self.target_net.load_state_dict(checkpoint.get("target_net", checkpoint["policy_net"]))
         if "optimizer" in checkpoint:
             self.optimizer.load_state_dict(checkpoint["optimizer"])

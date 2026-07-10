@@ -81,16 +81,18 @@ class UAVEnvConfig:
     # 垂直高度范围 z=[0,map_altitude]。
     map_altitude: float = 30.0
 
-    # 每执行一个动作的三维飞行距离。
+    # 第一阶段参数，仅为旧调用和轨迹偏差默认值保留。
     step_length: float = 2.0
 
     # 每个 episode 最大步数。
     max_steps: int = 320
 
-    # 第一阶段轨迹规划后处理参数。
-    trajectory_dt: float = 1.0
+    # 第二阶段离散时间动力学参数。
+    trajectory_dt: float = 0.5
     max_speed: float = 8.0
     max_acceleration: float = 3.0
+    max_jerk: float = 12.0
+    goal_speed_tolerance: float = 1.0
     smoothing_iterations: int = 1
 
     # 距离目标点小于该三维半径，认为到达目标。
@@ -120,6 +122,12 @@ class UAVEnvConfig:
     turn_penalty_scale: float = 0.04
     proximity_penalty_scale: float = 1.0
     altitude_penalty_scale: float = 0.01
+    acceleration_penalty_scale: float = 0.06
+    jerk_penalty_scale: float = 0.04
+    speed_penalty_scale: float = 0.03
+    velocity_alignment_reward_scale: float = 0.12
+    braking_risk_penalty_scale: float = 2.0
+    speed_clip_penalty_scale: float = 0.5
     goal_reward: float = 140.0
     collision_penalty: float = -140.0
     timeout_penalty: float = -30.0

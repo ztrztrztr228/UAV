@@ -28,6 +28,16 @@ class TrajectoryValidationResult:
     within_bounds: bool
     max_speed: float
     max_acceleration: float
+    max_jerk: float
+    speed_limit_satisfied: bool
+    acceleration_limit_satisfied: bool
+    jerk_limit_satisfied: bool
+    dynamics_consistent: bool
+    max_position_integration_error: float
+    max_velocity_integration_error: float
+    goal_reached: bool
+    final_goal_distance: float
+    final_speed: float
     sample_count: int
     total_time: float
     total_length: float
@@ -87,12 +97,20 @@ def _within_map_bounds(env: UAVPathPlanningEnv, point: np.ndarray) -> bool:
     )
 
 
-def _trajectory_collision_free(env: UAVPathPlanningEnv, positions: np.ndarray) -> bool:
-    for point in positions:
+def _trajectory_collision_free(env: UAVPathPlanningEnv, trajectory: TimedTrajectory) -> bool:
+    for point in trajectory.position:
         if env._point_in_collision(point):
             return False
-    for start, end in zip(positions[:-1], positions[1:]):
-        if env._segment_in_collision(start, end):
+    for index in range(len(trajectory.position) - 1):
+        duration = float(trajectory.time[index + 1] - trajectory.time[index])
+        if duration <= 0.0:
+            return False
+        if env._dynamics_segment_in_collision(
+            trajectory.position[index],
+            trajectory.velocity[index],
+            trajectory.acceleration[index + 1],
+            duration,
+        ):
             return False
     return True
 
@@ -102,18 +120,73 @@ def validate_timed_trajectory(
     reference_path: Sequence[np.ndarray] | np.ndarray,
     trajectory: TimedTrajectory,
     deviation_tolerance: float,
+    max_speed: float | None = None,
+    max_acceleration: float | None = None,
+    max_jerk: float | None = None,
+    goal: Sequence[float] | np.ndarray | None = None,
+    goal_radius: float | None = None,
+    goal_speed_tolerance: float | None = None,
+    integration_tolerance: float = 1e-4,
 ) -> TrajectoryValidationResult:
-    """Validate that equal-time trajectory samples stay close to the planned path."""
+    """复算轨迹的碰撞、边界、动力学积分和任务终点约束。"""
     if deviation_tolerance < 0.0:
         raise ValueError("deviation_tolerance must be non-negative.")
 
     deviations = trajectory_deviations(reference_path, trajectory)
     max_index = int(np.argmax(deviations)) if len(deviations) else 0
-    collision_free = _trajectory_collision_free(env, trajectory.position)
+    collision_free = _trajectory_collision_free(env, trajectory)
     within_bounds = all(_within_map_bounds(env, point) for point in trajectory.position)
     max_deviation = float(deviations[max_index]) if len(deviations) else 0.0
     mean_deviation = float(np.mean(deviations)) if len(deviations) else 0.0
-    passed = max_deviation <= deviation_tolerance and collision_free and within_bounds
+    speed_limit = env.config.max_speed if max_speed is None else float(max_speed)
+    acceleration_limit = env.config.max_acceleration if max_acceleration is None else float(max_acceleration)
+    jerk_limit = env.config.max_jerk if max_jerk is None else float(max_jerk)
+    if min(speed_limit, acceleration_limit, jerk_limit) <= 0.0:
+        raise ValueError("Dynamics limits must be positive.")
+
+    if len(trajectory.time) > 1:
+        dt = np.diff(trajectory.time)
+        if np.any(dt <= 0.0):
+            raise ValueError("Trajectory time values must be strictly increasing.")
+        expected_position_delta = 0.5 * (trajectory.velocity[:-1] + trajectory.velocity[1:]) * dt[:, None]
+        position_errors = np.linalg.norm(np.diff(trajectory.position, axis=0) - expected_position_delta, axis=1)
+        expected_velocity_delta = trajectory.acceleration[1:] * dt[:, None]
+        velocity_errors = np.linalg.norm(np.diff(trajectory.velocity, axis=0) - expected_velocity_delta, axis=1)
+        jerk_values = np.linalg.norm(np.diff(trajectory.acceleration, axis=0) / dt[:, None], axis=1)
+    else:
+        position_errors = np.zeros(1, dtype=np.float64)
+        velocity_errors = np.zeros(1, dtype=np.float64)
+        jerk_values = np.zeros(1, dtype=np.float64)
+    max_position_error = float(position_errors.max(initial=0.0))
+    max_velocity_error = float(velocity_errors.max(initial=0.0))
+    observed_max_jerk = float(jerk_values.max(initial=0.0))
+    dynamics_consistent = max(max_position_error, max_velocity_error) <= integration_tolerance
+    speed_ok = trajectory.max_speed <= speed_limit + integration_tolerance
+    acceleration_ok = trajectory.max_acceleration <= acceleration_limit + integration_tolerance
+    jerk_ok = observed_max_jerk <= jerk_limit + integration_tolerance
+
+    goal_point = env.goal if goal is None else np.asarray(goal, dtype=np.float64)
+    radius = env.config.goal_radius if goal_radius is None else float(goal_radius)
+    speed_tolerance = (
+        env.config.goal_speed_tolerance
+        if goal_speed_tolerance is None
+        else float(goal_speed_tolerance)
+    )
+    final_goal_distance = float(np.linalg.norm(trajectory.position[-1] - goal_point))
+    final_speed = float(trajectory.speed[-1])
+    goal_reached = final_goal_distance <= radius and final_speed <= speed_tolerance
+    passed = all(
+        (
+            max_deviation <= deviation_tolerance,
+            collision_free,
+            within_bounds,
+            speed_ok,
+            acceleration_ok,
+            jerk_ok,
+            dynamics_consistent,
+            goal_reached,
+        )
+    )
 
     return TrajectoryValidationResult(
         passed=bool(passed),
@@ -126,6 +199,16 @@ def validate_timed_trajectory(
         within_bounds=bool(within_bounds),
         max_speed=float(trajectory.max_speed),
         max_acceleration=float(trajectory.max_acceleration),
+        max_jerk=observed_max_jerk,
+        speed_limit_satisfied=bool(speed_ok),
+        acceleration_limit_satisfied=bool(acceleration_ok),
+        jerk_limit_satisfied=bool(jerk_ok),
+        dynamics_consistent=bool(dynamics_consistent),
+        max_position_integration_error=max_position_error,
+        max_velocity_integration_error=max_velocity_error,
+        goal_reached=bool(goal_reached),
+        final_goal_distance=final_goal_distance,
+        final_speed=final_speed,
         sample_count=int(len(trajectory.time)),
         total_time=float(trajectory.total_time),
         total_length=float(trajectory.total_length),

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""无人机三维离散动作空间定义。"""
+"""无人机三维离散加速度动作空间定义。"""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def _direction_name(dx: int, dy: int, dz: int) -> str:
 
 
 def _make_3d_action_space() -> tuple[tuple[str, ...], np.ndarray]:
-    """生成 26 个三维移动方向 + 1 个悬停动作。
+    """生成 26 个三维加速度方向 + 1 个零加速度动作。
 
     三维网格中 dx, dy, dz 都可以取 -1、0、1。去掉 (0,0,0) 后得到
     26 个邻接方向，包括水平移动、垂直移动、斜向上升/下降等。
@@ -48,7 +48,8 @@ def _make_3d_action_space() -> tuple[tuple[str, ...], np.ndarray]:
                 names.append(_direction_name(dx, dy, dz))
                 directions.append(vector)
 
-    names.append("hover")
+    names = [f"accelerate_{name}" for name in names]
+    names.append("coast")
     directions.append(np.asarray([0.0, 0.0, 0.0], dtype=np.float32))
     return tuple(names), np.asarray(directions, dtype=np.float32)
 
@@ -56,5 +57,6 @@ def _make_3d_action_space() -> tuple[tuple[str, ...], np.ndarray]:
 # ACTION_NAMES[i] 与 ACTION_DIRECTIONS[i] 一一对应。
 ACTION_NAMES, ACTION_DIRECTIONS = _make_3d_action_space()
 
-# 最后一个动作固定为悬停，奖励函数会用它判断是否需要扣悬停惩罚。
-HOVER_ACTION_INDEX = len(ACTION_NAMES) - 1
+# 最后一个动作固定为零加速度（惯性滑行）。保留旧名称作为兼容别名。
+COAST_ACTION_INDEX = len(ACTION_NAMES) - 1
+HOVER_ACTION_INDEX = COAST_ACTION_INDEX

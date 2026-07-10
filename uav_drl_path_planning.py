@@ -30,9 +30,16 @@ from uav_drl.actions import ACTION_NAMES
 from uav_drl.agent import DQNAgent
 from uav_drl.config import DEFAULT_SEED, UAVEnvConfig
 from uav_drl.environment import UAVPathPlanningEnv
+from uav_drl.trajectory import path_to_timed_trajectory
 from uav_drl.training import TrainHistory, evaluate_agent, train_dqn
 from uav_drl.utils import fix_seed, optional_point_3d
-from uav_drl.visualization import plot_training, plot_trajectory, save_trajectory_csv
+from uav_drl.visualization import (
+    plot_training,
+    plot_trajectory,
+    plot_trajectory_profiles,
+    save_timed_trajectory_csv,
+    save_trajectory_csv,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,6 +57,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=320)
     parser.add_argument("--goal-radius", type=float, default=3.0)
     parser.add_argument("--default-altitude", type=float, default=8.0)
+    parser.add_argument("--trajectory-dt", type=float, default=1.0)
+    parser.add_argument("--max-speed", type=float, default=8.0)
+    parser.add_argument("--max-acceleration", type=float, default=3.0)
+    parser.add_argument("--smoothing-iterations", type=int, default=1)
 
     parser.add_argument("--start-x", type=float)
     parser.add_argument("--start-y", type=float)
@@ -87,6 +98,10 @@ def make_config(args: argparse.Namespace) -> UAVEnvConfig:
         step_length=args.step_length,
         max_steps=args.max_steps,
         goal_radius=args.goal_radius,
+        trajectory_dt=args.trajectory_dt,
+        max_speed=args.max_speed,
+        max_acceleration=args.max_acceleration,
+        smoothing_iterations=args.smoothing_iterations,
     )
 
 
@@ -233,9 +248,26 @@ def main() -> None:
 
     if best_trajectory:
         save_trajectory_csv(best_trajectory, run_output_dir / "best_trajectory.csv")
+        timed_trajectory = path_to_timed_trajectory(
+            best_trajectory,
+            dt=config.trajectory_dt,
+            max_speed=config.max_speed,
+            max_acceleration=config.max_acceleration,
+            smoothing_iterations=config.smoothing_iterations,
+        )
+        save_timed_trajectory_csv(timed_trajectory, run_output_dir / "best_timed_trajectory.csv")
+        print(
+            "timed trajectory: "
+            f"samples={len(timed_trajectory.time)}, "
+            f"duration={timed_trajectory.total_time:.2f}s, "
+            f"length={timed_trajectory.total_length:.2f}m, "
+            f"max_speed={timed_trajectory.max_speed:.2f}m/s, "
+            f"max_acceleration={timed_trajectory.max_acceleration:.2f}m/s^2"
+        )
 
     if (args.visualize or not args.no_plots) and best_trajectory:
         plot_trajectory(env, best_trajectory, run_output_dir / "best_trajectory.png")
+        plot_trajectory_profiles(timed_trajectory, run_output_dir / "trajectory_profiles.png")
 
     if results:
         successes = [bool(result.get("success", False)) for result in results]

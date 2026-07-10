@@ -5,6 +5,7 @@ from .actions import ACTION_DIRECTIONS, ACTION_NAMES, HOVER_ACTION_INDEX
 from .agent import DQNAgent
 from .config import DEFAULT_SEED, BoxObstacle, RectObstacle, UAVEnvConfig
 from .environment import UAVPathPlanningEnv
+from .trajectory import TimedTrajectory, path_to_timed_trajectory
 from .training import TrainHistory, evaluate_agent, train_dqn
 
 __all__ = [
@@ -15,9 +16,11 @@ __all__ = [
     "DQNAgent",
     "BoxObstacle",
     "RectObstacle",
+    "TimedTrajectory",
     "TrainHistory",
     "UAVEnvConfig",
     "UAVPathPlanningEnv",
     "evaluate_agent",
+    "path_to_timed_trajectory",
     "train_dqn",
 ]

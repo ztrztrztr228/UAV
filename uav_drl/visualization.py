@@ -12,6 +12,7 @@ import numpy as np
 from .config import BoxObstacle
 from .environment import UAVPathPlanningEnv
 from .training import TrainHistory
+from .trajectory import TimedTrajectory
 
 
 def moving_average(values: Sequence[float], window: int) -> np.ndarray:
@@ -169,3 +170,89 @@ def save_trajectory_csv(trajectory: Sequence[np.ndarray], output_path: Path) -> 
         for step, point in enumerate(trajectory):
             writer.writerow([step, float(point[0]), float(point[1]), float(point[2])])
     print(f"Saved trajectory csv to {output_path}")
+
+
+def save_timed_trajectory_csv(trajectory: TimedTrajectory, output_path: Path) -> None:
+    """Save equal-time trajectory samples with velocity and acceleration."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(
+            [
+                "index",
+                "time_s",
+                "x",
+                "y",
+                "z",
+                "vx",
+                "vy",
+                "vz",
+                "speed",
+                "ax",
+                "ay",
+                "az",
+                "acceleration",
+                "path_s",
+            ]
+        )
+        for index, t in enumerate(trajectory.time):
+            position = trajectory.position[index]
+            velocity = trajectory.velocity[index]
+            acceleration = trajectory.acceleration[index]
+            writer.writerow(
+                [
+                    index,
+                    float(t),
+                    float(position[0]),
+                    float(position[1]),
+                    float(position[2]),
+                    float(velocity[0]),
+                    float(velocity[1]),
+                    float(velocity[2]),
+                    float(trajectory.speed[index]),
+                    float(acceleration[0]),
+                    float(acceleration[1]),
+                    float(acceleration[2]),
+                    float(trajectory.acceleration_norm[index]),
+                    float(trajectory.path_s[index]),
+                ]
+            )
+    print(f"Saved timed trajectory csv to {output_path}")
+
+
+def plot_trajectory_profiles(trajectory: TimedTrajectory, output_path: Path) -> None:
+    """Plot speed and acceleration over trajectory time."""
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib is not installed; skip trajectory profile plot.")
+        return
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
+    axes[0].plot(trajectory.time, trajectory.speed, color="#2563eb", label="speed")
+    axes[0].axhline(trajectory.max_speed, color="#94a3b8", linestyle="--", linewidth=1.0, label="observed max")
+    axes[0].set_ylabel("m/s")
+    axes[0].set_title("Trajectory Speed")
+    axes[0].legend()
+
+    axes[1].plot(trajectory.time, trajectory.acceleration_norm, color="#dc2626", label="acceleration")
+    axes[1].axhline(
+        trajectory.max_acceleration,
+        color="#94a3b8",
+        linestyle="--",
+        linewidth=1.0,
+        label="observed max",
+    )
+    axes[1].set_xlabel("time (s)")
+    axes[1].set_ylabel("m/s^2")
+    axes[1].set_title("Trajectory Acceleration")
+    axes[1].legend()
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    print(f"Saved trajectory profile plot to {output_path}")

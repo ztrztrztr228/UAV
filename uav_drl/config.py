@@ -87,6 +87,12 @@ class UAVEnvConfig:
     # 每个 episode 最大步数。
     max_steps: int = 320
 
+    # 第一阶段轨迹规划后处理参数。
+    trajectory_dt: float = 1.0
+    max_speed: float = 8.0
+    max_acceleration: float = 3.0
+    smoothing_iterations: int = 1
+
     # 距离目标点小于该三维半径，认为到达目标。
     goal_radius: float = 3.0
 

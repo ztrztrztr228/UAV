@@ -6,13 +6,15 @@ from dataclasses import replace
 import numpy as np
 
 from uav_drl.actions import ACTION_NAMES
-from uav_drl.config import UAVEnvConfig
+from uav_drl.config import UAVEnvConfig, wujing_airfield_obstacles
 from uav_drl.environment import UAVPathPlanningEnv
 from uav_drl.validation import validate_timed_trajectory
 
 
 def make_config(**overrides: object) -> UAVEnvConfig:
     values: dict[str, object] = {
+        "map_x_min": 0.0,
+        "map_y_min": 0.0,
         "map_width": 40.0,
         "map_height": 40.0,
         "map_altitude": 30.0,
@@ -30,6 +32,21 @@ def make_config(**overrides: object) -> UAVEnvConfig:
 
 
 class DynamicsEnvironmentTests(unittest.TestCase):
+    def test_wujing_building_estimates_are_inflated_and_height_assumptions_applied(self) -> None:
+        obstacles = wujing_airfield_obstacles(inflation=8.0)
+        self.assertEqual(len(obstacles), 10)
+        self.assertAlmostEqual(obstacles[0].xmin, 34.85)
+        self.assertAlmostEqual(obstacles[0].ymax, 257.8)
+        self.assertEqual(obstacles[0].zmax, 15.0)
+        self.assertAlmostEqual(obstacles[-1].ymin, -15.15)
+        self.assertEqual(obstacles[-1].zmax, 25.0)
+
+    def test_negative_map_origin_is_supported(self) -> None:
+        env = UAVPathPlanningEnv(make_config(map_y_min=-20.0))
+        state = env.reset(start=(10, -10, 10), goal=(30, -10, 10))
+        self.assertAlmostEqual(float(state[1]), 0.25, places=6)
+        self.assertFalse(env._point_in_collision(np.asarray([10.0, -10.0, 10.0])))
+
     def test_state_and_action_include_dynamics(self) -> None:
         env = UAVPathPlanningEnv(make_config())
         state = env.reset(start=(10, 10, 10), goal=(30, 10, 10))

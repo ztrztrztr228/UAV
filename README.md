@@ -18,8 +18,20 @@ uav_drl/
   visualization.py             # 训练曲线、三维轨迹图、CSV 保存
   validation.py                # 碰撞、边界、动力学积分和终点验证
   utils.py                     # 随机种子、三维坐标解析
+data/
+  wujing_airfield_building_estimates.csv  # 吴泾试飞场公开影像估算数据
 UAV_DRL_项目提纲.md             # 项目说明和报告提纲
 ```
+
+## 吴泾试飞场估算场景
+
+默认地图已经切换为吴泾试飞场估算场景。局部坐标原点为 GCJ-02
+`(121.4480000, 31.0680000)`，`x` 向东、`y` 向北、`z` 向上，单位均为米。
+当前仿真范围为 `x=[0,500]`、`y=[-30,280]`、`z=[0,50]`。
+
+10 栋建筑按 CSV 中的中心点和轴对齐尺寸建模，默认水平外扩 8 m。
+B01-B08 的高度暂假设为 15 m，B09-B10 暂假设为 25 m。这些数值来自公开
+影像估算和保守假设，只适用于算法仿真，不能直接用于真实飞行。
 
 ## 安装依赖
 
@@ -42,14 +54,17 @@ python .\uav_drl_path_planning.py --episodes 1500 --eval-episodes 20 --trajector
 ## 指定三维起点和目标点
 
 ```powershell
-python .\uav_drl_path_planning.py --episodes 1500 --start-x 5 --start-y 5 --start-z 8 --target-x 92 --target-y 88 --target-z 12 --visualize
+python .\uav_drl_path_planning.py --episodes 1500 --fresh-start --start-x 20 --start-y 100 --start-z 8 --target-x 480 --target-y 260 --target-z 12 --visualize
 ```
 
 ## 加载模型进行规划
 
 ```powershell
-python .\uav_drl_path_planning.py --skip-train --load-model .\outputs\uav_dynamics_dqn.pt --start-x 5 --start-y 5 --start-z 8 --target-x 92 --target-y 88 --target-z 12 --visualize
+python .\uav_drl_path_planning.py --skip-train --load-model .\outputs\wujing_airfield_dqn.pt --start-x 20 --start-y 100 --start-z 8 --target-x 480 --target-y 260 --target-z 12 --visualize
 ```
+
+建筑水平外扩量可通过 `--obstacle-inflation` 调整，例如设为 10 m。更换场景后
+应使用 `--fresh-start` 并重新训练，避免续载旧地图的模型和经验回放池。
 
 ## 输出文件
 

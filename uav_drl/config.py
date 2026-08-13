@@ -11,6 +11,26 @@ import numpy as np
 
 DEFAULT_SEED = 2026
 
+# 吴泾试飞场局部 ENU 坐标元数据。经纬度仅用于记录场景基准，仿真内部全部使用米。
+WUJING_ORIGIN_LON_GCJ02 = 121.4480000
+WUJING_ORIGIN_LAT_GCJ02 = 31.0680000
+WUJING_BUILDING_INFLATION_M = 8.0
+
+# id, 名称, 中心东向坐标, 中心北向坐标, 东西尺寸, 南北尺寸, 假设高度, 置信度。
+# B09/B10 是旧厂房群整体包络，暂按 25 m；其余仓库/厂房暂按 15 m。
+WUJING_BUILDING_ESTIMATES: tuple[tuple[str, str, float, float, float, float, float, str], ...] = (
+    ("B01", "西北长条厂房", 77.4, 226.8, 69.1, 46.0, 15.0, "medium"),
+    ("B02", "西侧设备或厂房", 80.0, 176.0, 74.2, 35.8, 15.0, "medium"),
+    ("B03", "中部小型白顶库", 200.2, 130.8, 53.7, 34.8, 15.0, "medium"),
+    ("B04", "东北大型白顶库", 379.2, 193.3, 150.9, 62.4, 15.0, "medium"),
+    ("B05", "东北中型厂房A", 335.8, 135.4, 74.2, 46.0, 15.0, "medium"),
+    ("B06", "东北中型厂房B", 421.4, 135.4, 71.6, 46.0, 15.0, "medium"),
+    ("B07", "西南白顶厂房A", 120.9, 22.3, 74.2, 58.8, 15.0, "medium"),
+    ("B08", "西南白顶厂房B", 197.6, 22.8, 69.1, 57.8, 15.0, "medium"),
+    ("B09", "东南旧厂房群A", 357.5, 26.1, 76.7, 51.1, 25.0, "low"),
+    ("B10", "东南旧厂房群B", 438.1, 32.5, 48.6, 79.3, 25.0, "low"),
+)
+
 
 @dataclass(frozen=True)
 class BoxObstacle:
@@ -53,33 +73,57 @@ class BoxObstacle:
 RectObstacle = BoxObstacle
 
 
-def default_community_obstacles() -> list[BoxObstacle]:
-    """默认三维小区地图中的建筑物/禁飞区。
+def wujing_airfield_obstacles(inflation: float = WUJING_BUILDING_INFLATION_M) -> list[BoxObstacle]:
+    """根据公开影像估算值构建吴泾试飞场建筑物包络框。
 
-    默认地图水平范围为 100 x 100，高度为 30。下面的楼栋从地面 z=0
-    向上延伸到不同高度，形成三维避障环境。
+    ``inflation`` 只在水平面向外膨胀，用于覆盖约 0.51 m/px 影像量测误差和
+    建筑轮廓不确定性。高度不是实测值：B01-B08 假设 15 m，B09-B10 假设
+    25 m。这些障碍物只能用于仿真，不能直接作为真实飞行安全边界。
     """
+    if inflation < 0.0:
+        raise ValueError("Building inflation must be non-negative.")
 
-    return [
-        BoxObstacle(18, 12, 0, 34, 43, 18, "building_a"),
-        BoxObstacle(47, 8, 0, 63, 30, 14, "building_b"),
-        BoxObstacle(72, 43, 0, 88, 76, 24, "building_c"),
-        BoxObstacle(12, 61, 0, 43, 77, 12, "building_d"),
-        BoxObstacle(51, 56, 0, 64, 91, 20, "building_e"),
-        BoxObstacle(36, 39, 0, 45, 53, 28, "tower"),
-    ]
+    obstacles: list[BoxObstacle] = []
+    for building_id, name, x, y, width, depth, height, confidence in WUJING_BUILDING_ESTIMATES:
+        half_width = width / 2.0 + inflation
+        half_depth = depth / 2.0 + inflation
+        obstacles.append(
+            BoxObstacle(
+                xmin=x - half_width,
+                ymin=y - half_depth,
+                zmin=0.0,
+                xmax=x + half_width,
+                ymax=y + half_depth,
+                zmax=height,
+                name=f"{building_id}_{name}_{confidence}",
+            )
+        )
+    return obstacles
+
+
+# 保留旧函数名，避免已有调用失效；默认场景已经切换为吴泾试飞场。
+default_community_obstacles = wujing_airfield_obstacles
 
 
 @dataclass
 class UAVEnvConfig:
     """三维无人机环境参数配置。"""
 
-    # 水平地图范围 x=[0,map_width], y=[0,map_height]。
-    map_width: float = 100.0
-    map_height: float = 100.0
+    scene_name: str = "wujing_airfield_estimated"
+    coordinate_system: str = "local_enu_from_gcj02_origin"
+    origin_lon_gcj02: float = WUJING_ORIGIN_LON_GCJ02
+    origin_lat_gcj02: float = WUJING_ORIGIN_LAT_GCJ02
+    obstacle_inflation: float = WUJING_BUILDING_INFLATION_M
+
+    # 局部坐标范围：x=[map_x_min, map_x_min+map_width]，y 同理。
+    # y 下界必须为负数，因为 B07/B08/B10 的估算包络跨过局部原点南侧。
+    map_x_min: float = 0.0
+    map_y_min: float = -30.0
+    map_width: float = 500.0
+    map_height: float = 310.0
 
     # 垂直高度范围 z=[0,map_altitude]。
-    map_altitude: float = 30.0
+    map_altitude: float = 50.0
 
     # 第一阶段参数，仅为旧调用和轨迹偏差默认值保留。
     step_length: float = 2.0
@@ -133,7 +177,7 @@ class UAVEnvConfig:
     timeout_penalty: float = -30.0
 
     # 默认三维建筑物列表。
-    obstacles: list[BoxObstacle] = field(default_factory=default_community_obstacles)
+    obstacles: list[BoxObstacle] = field(default_factory=wujing_airfield_obstacles)
 
 
 def config_to_dict(config: UAVEnvConfig) -> dict[str, object]:

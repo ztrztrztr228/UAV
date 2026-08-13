@@ -28,7 +28,7 @@ import torch
 
 from uav_drl.actions import ACTION_NAMES
 from uav_drl.agent import DQNAgent
-from uav_drl.config import DEFAULT_SEED, UAVEnvConfig
+from uav_drl.config import DEFAULT_SEED, UAVEnvConfig, wujing_airfield_obstacles
 from uav_drl.environment import UAVPathPlanningEnv
 from uav_drl.training import TrainHistory, evaluate_agent, train_dqn
 from uav_drl.utils import fix_seed, optional_point_3d
@@ -51,9 +51,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
 
-    parser.add_argument("--map-width", type=float, default=100.0)
-    parser.add_argument("--map-height", type=float, default=100.0)
-    parser.add_argument("--map-altitude", type=float, default=30.0)
+    parser.add_argument("--map-x-min", type=float, default=0.0)
+    parser.add_argument("--map-y-min", type=float, default=-30.0)
+    parser.add_argument("--map-width", type=float, default=500.0)
+    parser.add_argument("--map-height", type=float, default=310.0)
+    parser.add_argument("--map-altitude", type=float, default=50.0)
+    parser.add_argument("--obstacle-inflation", type=float, default=8.0)
     parser.add_argument("--step-length", type=float, default=2.0)
     parser.add_argument("--max-steps", type=int, default=320)
     parser.add_argument("--goal-radius", type=float, default=3.0)
@@ -89,7 +92,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epsilon-decay", type=float, default=350.0)
 
     parser.add_argument("--output-dir", type=Path, default=Path("outputs"))
-    parser.add_argument("--save-model", type=Path, default=Path("outputs/uav_dynamics_dqn.pt"))
+    parser.add_argument("--save-model", type=Path, default=Path("outputs/wujing_airfield_dqn.pt"))
     parser.add_argument("--load-model", type=Path)
     parser.add_argument("--fresh-start", action="store_true", help="do not auto-load the previous checkpoint")
     parser.add_argument("--no-plots", action="store_true")
@@ -101,6 +104,8 @@ def parse_args() -> argparse.Namespace:
 def make_config(args: argparse.Namespace) -> UAVEnvConfig:
     """根据命令行参数生成三维环境配置。"""
     return UAVEnvConfig(
+        map_x_min=args.map_x_min,
+        map_y_min=args.map_y_min,
         map_width=args.map_width,
         map_height=args.map_height,
         map_altitude=args.map_altitude,
@@ -113,14 +118,16 @@ def make_config(args: argparse.Namespace) -> UAVEnvConfig:
         max_jerk=args.max_jerk,
         goal_speed_tolerance=args.goal_speed_tolerance,
         smoothing_iterations=args.smoothing_iterations,
+        obstacle_inflation=args.obstacle_inflation,
+        obstacles=wujing_airfield_obstacles(args.obstacle_inflation),
     )
 
 
 def ground_center_start(config: UAVEnvConfig) -> tuple[float, float, float]:
  #起点设置为地图中央地面
     return (
-        config.map_width / 2.0,
-        config.map_height / 2.0,
+        config.map_x_min + config.map_width / 2.0,
+        config.map_y_min + config.map_height / 2.0,
         config.uav_radius + 1e-3,
     )
 
@@ -195,9 +202,11 @@ def main() -> None:
     print(f"state_dim={env.state_dim}, action_dim={env.num_actions}, device={agent.device}")
     print(f"actions={dict(enumerate(ACTION_NAMES))}")
     print(
-        "map="
-        f"({env.config.map_width}, {env.config.map_height}, {env.config.map_altitude}), "
-        f"obstacles={len(env.config.obstacles)}"
+        f"scene={env.config.scene_name}, "
+        f"origin_gcj02=({env.config.origin_lon_gcj02}, {env.config.origin_lat_gcj02}), "
+        f"bounds=x[{env.map_min[0]}, {env.map_max[0]}], "
+        f"y[{env.map_min[1]}, {env.map_max[1]}], z[{env.map_min[2]}, {env.map_max[2]}], "
+        f"obstacles={len(env.config.obstacles)}, inflation={env.config.obstacle_inflation}m"
     )
 
     resume_model = args.load_model

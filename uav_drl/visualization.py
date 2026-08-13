@@ -121,8 +121,8 @@ def plot_trajectory(
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_zlabel("z")
-    ax.set_xlim(0, env.config.map_width)
-    ax.set_ylim(0, env.config.map_height)
+    ax.set_xlim(env.config.map_x_min, env.config.map_x_min + env.config.map_width)
+    ax.set_ylim(env.config.map_y_min, env.config.map_y_min + env.config.map_height)
     ax.set_zlim(0, env.config.map_altitude)
 
     for obstacle in env.config.obstacles:
@@ -138,7 +138,7 @@ def plot_trajectory(
             (obstacle.xmin + obstacle.xmax) / 2,
             (obstacle.ymin + obstacle.ymax) / 2,
             obstacle.zmax + 0.4,
-            obstacle.name,
+            obstacle.name.split("_", 1)[0],
             ha="center",
             va="bottom",
             fontsize=7,
@@ -291,8 +291,8 @@ def plot_trajectory_validation(
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_zlabel("z")
-    ax.set_xlim(0, env.config.map_width)
-    ax.set_ylim(0, env.config.map_height)
+    ax.set_xlim(env.config.map_x_min, env.config.map_x_min + env.config.map_width)
+    ax.set_ylim(env.config.map_y_min, env.config.map_y_min + env.config.map_height)
     ax.set_zlim(0, env.config.map_altitude)
 
     for obstacle in env.config.obstacles:

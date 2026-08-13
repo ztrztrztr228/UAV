@@ -32,6 +32,11 @@ class UAVPathPlanningEnv:
             [self.config.map_width, self.config.map_height, self.config.map_altitude],
             dtype=np.float32,
         )
+        self.map_min = np.asarray(
+            [self.config.map_x_min, self.config.map_y_min, 0.0],
+            dtype=np.float32,
+        )
+        self.map_max = self.map_min + self.map_size
         self.max_distance = float(np.linalg.norm(self.map_size))
 
         self.position = np.zeros(3, dtype=np.float32)
@@ -48,6 +53,9 @@ class UAVPathPlanningEnv:
         self.reset()
 
     def _validate_config(self) -> None:
+        for name in ("map_width", "map_height", "map_altitude"):
+            if float(getattr(self.config, name)) <= 2.0 * self.config.uav_radius:
+                raise ValueError(f"{name} must be greater than twice the UAV radius.")
         for name in ("trajectory_dt", "max_speed", "max_acceleration", "max_jerk"):
             if float(getattr(self.config, name)) <= 0.0:
                 raise ValueError(f"{name} must be positive.")
@@ -220,7 +228,7 @@ class UAVPathPlanningEnv:
         braking_margin = np.clip((clearance - stopping_distance) / self.config.lidar_range, -1.0, 1.0)
         state = np.concatenate(
             [
-                self.position / self.map_size,
+                (self.position - self.map_min) / self.map_size,
                 delta / self.map_size,
                 np.asarray([distance / self.max_distance], dtype=np.float32),
                 heading.astype(np.float32),
@@ -254,8 +262,8 @@ class UAVPathPlanningEnv:
         raise RuntimeError("Could not sample a valid goal far from start.")
 
     def _sample_free_point(self) -> np.ndarray:
-        low = np.full(3, self.config.uav_radius, dtype=np.float32)
-        high = self.map_size - self.config.uav_radius
+        low = self.map_min + self.config.uav_radius
+        high = self.map_max - self.config.uav_radius
         for _ in range(10_000):
             point = self.rng.uniform(low, high).astype(np.float32)
             if not self._point_in_collision(point):
@@ -293,24 +301,13 @@ class UAVPathPlanningEnv:
         return False
 
     def _point_in_collision(self, point: np.ndarray) -> bool:
-        x, y, z = map(float, point)
         radius = self.config.uav_radius
-        if not (radius <= x <= self.config.map_width - radius):
-            return True
-        if not (radius <= y <= self.config.map_height - radius):
-            return True
-        if not (radius <= z <= self.config.map_altitude - radius):
+        if np.any(point < self.map_min + radius) or np.any(point > self.map_max - radius):
             return True
         return any(obstacle.contains(point, margin=radius) for obstacle in self.config.obstacles)
 
     def _nearest_clearance(self, point: np.ndarray) -> float:
-        x, y, z = map(float, point)
-        boundary_clearance = min(
-            x, y, z,
-            self.config.map_width - x,
-            self.config.map_height - y,
-            self.config.map_altitude - z,
-        )
+        boundary_clearance = float(min(np.min(point - self.map_min), np.min(self.map_max - point)))
         obstacle_clearance = min(
             (obstacle.distance_to(point) for obstacle in self.config.obstacles),
             default=float("inf"),

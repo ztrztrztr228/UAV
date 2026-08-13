@@ -90,11 +90,7 @@ def trajectory_deviations(
 
 def _within_map_bounds(env: UAVPathPlanningEnv, point: np.ndarray) -> bool:
     radius = env.config.uav_radius
-    return bool(
-        radius <= point[0] <= env.config.map_width - radius
-        and radius <= point[1] <= env.config.map_height - radius
-        and radius <= point[2] <= env.config.map_altitude - radius
-    )
+    return bool(np.all(point >= env.map_min + radius) and np.all(point <= env.map_max - radius))
 
 
 def _trajectory_collision_free(env: UAVPathPlanningEnv, trajectory: TimedTrajectory) -> bool:

@@ -32,6 +32,29 @@ def make_config(**overrides: object) -> UAVEnvConfig:
 
 
 class DynamicsEnvironmentTests(unittest.TestCase):
+    def test_measured_default_dynamics_parameters(self) -> None:
+        config = UAVEnvConfig()
+        self.assertAlmostEqual(config.max_horizontal_speed, 23.0)
+        self.assertAlmostEqual(config.max_speed, 23.18)
+        self.assertAlmostEqual(config.max_climb_speed, 2.85)
+        self.assertAlmostEqual(config.max_descent_speed, 1.65)
+        self.assertAlmostEqual(config.max_climb_angle_deg, 90.0)
+        self.assertAlmostEqual(config.climb_angle_at_max_horizontal_speed_deg, 7.1, places=1)
+        self.assertAlmostEqual(config.max_acceleration, 15.5)
+        self.assertAlmostEqual(config.normal_acceleration, 3.0)
+        self.assertAlmostEqual(config.max_deceleration, 3.09)
+        self.assertAlmostEqual(config.max_jerk, 78.0)
+        self.assertAlmostEqual(config.raw_max_jerk, 142.0)
+
+    def test_velocity_projection_applies_horizontal_vertical_and_combined_limits(self) -> None:
+        env = UAVPathPlanningEnv(UAVEnvConfig(obstacles=[]))
+        ascent = env._limit_velocity(np.asarray([30.0, 0.0, 10.0]))
+        descent = env._limit_velocity(np.asarray([0.0, 0.0, -10.0]))
+        self.assertLessEqual(float(np.linalg.norm(ascent[:2])), 23.0 + 1e-6)
+        self.assertLessEqual(float(ascent[2]), 2.85 + 1e-6)
+        self.assertLessEqual(float(np.linalg.norm(ascent)), 23.18 + 1e-6)
+        self.assertGreaterEqual(float(descent[2]), -1.65 - 1e-6)
+
     def test_wujing_building_estimates_are_inflated_and_height_assumptions_applied(self) -> None:
         obstacles = wujing_airfield_obstacles(inflation=8.0)
         self.assertEqual(len(obstacles), 10)

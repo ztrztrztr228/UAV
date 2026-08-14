@@ -178,14 +178,17 @@ def evaluate_agent(
             f"path={final_info['path_length']:.2f}"
         )
 
-    successes = [bool(result.get("success", False)) for result in results]
-    collisions = [bool(result.get("collision", False)) for result in results]
-    print(
-        "evaluation summary: "
-        f"success_rate={np.mean(successes):.2%}, "
-        f"collision_rate={np.mean(collisions):.2%}, "
-        f"avg_reward={np.mean([r['total_reward'] for r in results]):.2f}"
-    )
+    if results:
+        successes = [bool(result.get("success", False)) for result in results]
+        collisions = [bool(result.get("collision", False)) for result in results]
+        print(
+            "evaluation summary: "
+            f"success_rate={np.mean(successes):.2%}, "
+            f"collision_rate={np.mean(collisions):.2%}, "
+            f"avg_reward={np.mean([r['total_reward'] for r in results]):.2f}"
+        )
+    else:
+        print("evaluation skipped: eval_episodes=0")
 
     if best_start is not None and best_goal is not None:
         env.start = best_start

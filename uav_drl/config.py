@@ -131,11 +131,24 @@ class UAVEnvConfig:
     # 每个 episode 最大步数。
     max_steps: int = 320
 
-    # 第二阶段离散时间动力学参数。
+    # 第二阶段离散时间动力学参数。速度单位为 m/s，加速度单位为 m/s²，
+    # jerk 单位为 m/s³；下降速度以正的幅值保存。
     trajectory_dt: float = 0.5
-    max_speed: float = 8.0
-    max_acceleration: float = 3.0
-    max_jerk: float = 12.0
+    max_horizontal_speed: float = 23.0
+    max_speed: float = 23.18
+    max_climb_speed: float = 2.85
+    max_descent_speed: float = 1.65
+    max_climb_angle_deg: float = 90.0
+
+    # 15.5 m/s² 是日志瞬时峰值；正常飞行控制采用 3 m/s²（给定 3--5
+    # m/s² 区间的保守端），制动使用实测最大减速度 3.09 m/s²。
+    max_acceleration: float = 15.5
+    normal_acceleration: float = 3.0
+    max_deceleration: float = 3.09
+
+    # 轨迹约束采用平滑后峰值；原始日志峰值单独保留用于追溯。
+    max_jerk: float = 78.0
+    raw_max_jerk: float = 142.0
     goal_speed_tolerance: float = 1.0
     smoothing_iterations: int = 1
 
@@ -178,6 +191,11 @@ class UAVEnvConfig:
 
     # 默认三维建筑物列表。
     obstacles: list[BoxObstacle] = field(default_factory=wujing_airfield_obstacles)
+
+    @property
+    def climb_angle_at_max_horizontal_speed_deg(self) -> float:
+        """最大水平速度与最大上升速度同时出现时的航迹爬升角。"""
+        return math.degrees(math.atan2(self.max_climb_speed, self.max_horizontal_speed))
 
 
 def config_to_dict(config: UAVEnvConfig) -> dict[str, object]:

@@ -16,7 +16,7 @@ from .trajectory import TimedTrajectory, dynamics_samples_to_trajectory
 class UAVPathPlanningEnv:
     """使用点质量模型的三维轨迹规划环境。
 
-    动作为 26 个单位方向上的最大加速度和一个零加速度动作。每一步先计算
+    动作为 26 个单位方向上的正常飞行加速度和一个零加速度动作。每一步先计算
     ``v[k+1] = clip(v[k] + a[k] * dt)``，再用梯形积分更新位置。46 维状态由
     位置、目标相对量、航向、速度、加速度、动力学裕度、雷达和时间进度组成。
     """
@@ -56,9 +56,22 @@ class UAVPathPlanningEnv:
         for name in ("map_width", "map_height", "map_altitude"):
             if float(getattr(self.config, name)) <= 2.0 * self.config.uav_radius:
                 raise ValueError(f"{name} must be greater than twice the UAV radius.")
-        for name in ("trajectory_dt", "max_speed", "max_acceleration", "max_jerk"):
+        for name in (
+            "trajectory_dt",
+            "max_horizontal_speed",
+            "max_speed",
+            "max_climb_speed",
+            "max_descent_speed",
+            "max_acceleration",
+            "normal_acceleration",
+            "max_deceleration",
+            "max_jerk",
+            "raw_max_jerk",
+        ):
             if float(getattr(self.config, name)) <= 0.0:
                 raise ValueError(f"{name} must be positive.")
+        if not 0.0 < self.config.max_climb_angle_deg <= 90.0:
+            raise ValueError("max_climb_angle_deg must be in (0, 90].")
         if self.config.goal_speed_tolerance < 0.0:
             raise ValueError("goal_speed_tolerance must be non-negative.")
 
@@ -95,14 +108,21 @@ class UAVPathPlanningEnv:
         previous_velocity = self.velocity.copy()
         previous_acceleration = self.acceleration.copy()
         previous_distance = self.distance_to_goal()
-        commanded_acceleration = ACTION_DIRECTIONS[action] * self.config.max_acceleration
+        commanded_acceleration = self._limit_commanded_acceleration(
+            ACTION_DIRECTIONS[action] * self.config.normal_acceleration,
+            previous_velocity,
+        )
+        acceleration_delta = commanded_acceleration - previous_acceleration
+        max_acceleration_delta = self.config.max_jerk * dt
+        acceleration_delta_norm = float(np.linalg.norm(acceleration_delta))
+        if acceleration_delta_norm > max_acceleration_delta:
+            commanded_acceleration = previous_acceleration + acceleration_delta * (
+                max_acceleration_delta / acceleration_delta_norm
+            )
 
         unconstrained_velocity = previous_velocity + commanded_acceleration * dt
-        unconstrained_speed = float(np.linalg.norm(unconstrained_velocity))
-        if unconstrained_speed > self.config.max_speed:
-            next_velocity = unconstrained_velocity * (self.config.max_speed / unconstrained_speed)
-        else:
-            next_velocity = unconstrained_velocity
+        next_velocity = self._limit_velocity(unconstrained_velocity)
+        clipped_velocity = float(np.linalg.norm(unconstrained_velocity - next_velocity))
         effective_acceleration = (next_velocity - previous_velocity) / dt
         candidate = previous_position + 0.5 * (previous_velocity + next_velocity) * dt
 
@@ -121,7 +141,7 @@ class UAVPathPlanningEnv:
                 collision=True,
                 reward=reward,
                 commanded_acceleration=commanded_acceleration,
-                speed_clipped=unconstrained_speed > self.config.max_speed,
+                speed_clipped=clipped_velocity > 1e-9,
             )
 
         self.position = candidate.astype(np.float32)
@@ -140,7 +160,7 @@ class UAVPathPlanningEnv:
             progress,
             distance,
             previous_acceleration,
-            max(0.0, unconstrained_speed - self.config.max_speed),
+            clipped_velocity,
         )
         speed = float(np.linalg.norm(self.velocity))
         reached_goal = distance <= self.config.goal_radius and speed <= self.config.goal_speed_tolerance
@@ -162,8 +182,46 @@ class UAVPathPlanningEnv:
             reward=reward,
             progress=progress,
             commanded_acceleration=commanded_acceleration,
-            speed_clipped=unconstrained_speed > self.config.max_speed,
+            speed_clipped=clipped_velocity > 1e-9,
         )
+
+    def _limit_commanded_acceleration(
+        self,
+        acceleration: np.ndarray,
+        velocity: np.ndarray,
+    ) -> np.ndarray:
+        """Apply normal-flight, peak, and measured deceleration limits."""
+        limit = min(self.config.normal_acceleration, self.config.max_acceleration)
+        if np.linalg.norm(velocity) > 1e-9 and float(np.dot(acceleration, velocity)) < 0.0:
+            limit = min(limit, self.config.max_deceleration)
+        norm = float(np.linalg.norm(acceleration))
+        if norm > limit:
+            return acceleration * (limit / norm)
+        return acceleration
+
+    def _limit_velocity(self, velocity: np.ndarray) -> np.ndarray:
+        """Project velocity onto horizontal, vertical, climb-angle, and 3D limits."""
+        limited = np.asarray(velocity, dtype=np.float64).copy()
+        horizontal_speed = float(np.linalg.norm(limited[:2]))
+        if horizontal_speed > self.config.max_horizontal_speed:
+            limited[:2] *= self.config.max_horizontal_speed / horizontal_speed
+            horizontal_speed = self.config.max_horizontal_speed
+
+        limited[2] = np.clip(
+            limited[2],
+            -self.config.max_descent_speed,
+            self.config.max_climb_speed,
+        )
+        if limited[2] > 0.0 and self.config.max_climb_angle_deg < 90.0:
+            angle_vertical_limit = horizontal_speed * math.tan(
+                math.radians(self.config.max_climb_angle_deg)
+            )
+            limited[2] = min(limited[2], angle_vertical_limit)
+
+        speed = float(np.linalg.norm(limited))
+        if speed > self.config.max_speed:
+            limited *= self.config.max_speed / speed
+        return limited.astype(np.float32)
 
     def timed_trajectory(self) -> TimedTrajectory:
         """返回 RL 动力学积分直接产生的等时间轨迹点。"""
@@ -192,7 +250,8 @@ class UAVPathPlanningEnv:
         speed = float(np.linalg.norm(self.velocity))
         acceleration_norm = float(np.linalg.norm(self.acceleration))
         jerk = float(np.linalg.norm(self.acceleration - previous_acceleration)) / self.config.trajectory_dt
-        reward -= self.config.acceleration_penalty_scale * acceleration_norm / self.config.max_acceleration
+        acceleration_scale = min(self.config.normal_acceleration, self.config.max_acceleration)
+        reward -= self.config.acceleration_penalty_scale * acceleration_norm / acceleration_scale
         reward -= self.config.jerk_penalty_scale * min(2.0, jerk / self.config.max_jerk)
         reward -= self.config.speed_penalty_scale * (speed / self.config.max_speed) ** 2
         reward -= self.config.speed_clip_penalty_scale * clipped_speed / self.config.max_speed
@@ -208,7 +267,7 @@ class UAVPathPlanningEnv:
         if clearance < self.config.safety_radius:
             unsafe_ratio = (self.config.safety_radius - clearance) / self.config.safety_radius
             reward -= self.config.proximity_penalty_scale * unsafe_ratio
-        stopping_distance = speed * speed / (2.0 * self.config.max_acceleration)
+        stopping_distance = speed * speed / (2.0 * self.config.max_deceleration)
         if stopping_distance > clearance:
             risk = min(2.0, (stopping_distance - clearance) / self.config.safety_radius)
             reward -= self.config.braking_risk_penalty_scale * risk
@@ -222,8 +281,9 @@ class UAVPathPlanningEnv:
         distance = float(np.linalg.norm(delta))
         heading = delta / distance if distance > 1e-9 else np.zeros(3, dtype=np.float32)
         speed_ratio = float(np.linalg.norm(self.velocity)) / self.config.max_speed
-        acceleration_ratio = float(np.linalg.norm(self.acceleration)) / self.config.max_acceleration
-        stopping_distance = float(np.linalg.norm(self.velocity)) ** 2 / (2.0 * self.config.max_acceleration)
+        acceleration_scale = min(self.config.normal_acceleration, self.config.max_acceleration)
+        acceleration_ratio = float(np.linalg.norm(self.acceleration)) / acceleration_scale
+        stopping_distance = float(np.linalg.norm(self.velocity)) ** 2 / (2.0 * self.config.max_deceleration)
         clearance = self._nearest_clearance(self.position)
         braking_margin = np.clip((clearance - stopping_distance) / self.config.lidar_range, -1.0, 1.0)
         state = np.concatenate(
@@ -233,7 +293,7 @@ class UAVPathPlanningEnv:
                 np.asarray([distance / self.max_distance], dtype=np.float32),
                 heading.astype(np.float32),
                 self.velocity / self.config.max_speed,
-                self.acceleration / self.config.max_acceleration,
+                self.acceleration / acceleration_scale,
                 np.asarray([speed_ratio, acceleration_ratio, braking_margin], dtype=np.float32),
                 self._lidar_scan(),
                 np.asarray([self.steps / max(1, self.config.max_steps)], dtype=np.float32),

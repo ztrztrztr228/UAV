@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import time
 from datetime import datetime
@@ -28,8 +29,9 @@ import torch
 
 from uav_drl.actions import ACTION_NAMES
 from uav_drl.agent import DQNAgent
-from uav_drl.config import DEFAULT_SEED, UAVEnvConfig, wujing_airfield_obstacles
+from uav_drl.config import DEFAULT_SEED, UAVEnvConfig, config_to_dict
 from uav_drl.environment import UAVPathPlanningEnv
+from uav_drl.scenes import available_scene_keys, get_training_scene
 from uav_drl.training import TrainHistory, evaluate_agent, train_dqn
 from uav_drl.utils import fix_seed, optional_point_3d
 from uav_drl.validation import save_validation_json, validate_timed_trajectory
@@ -50,21 +52,35 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-episodes", type=int, default=5)
     parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument("--scene", choices=available_scene_keys(), default="wujing_airfield")
+    parser.add_argument("--list-scenes", action="store_true")
 
-    parser.add_argument("--map-x-min", type=float, default=0.0)
-    parser.add_argument("--map-y-min", type=float, default=-30.0)
-    parser.add_argument("--map-width", type=float, default=500.0)
-    parser.add_argument("--map-height", type=float, default=310.0)
-    parser.add_argument("--map-altitude", type=float, default=50.0)
-    parser.add_argument("--obstacle-inflation", type=float, default=8.0)
+    parser.add_argument("--map-x-min", type=float)
+    parser.add_argument("--map-y-min", type=float)
+    parser.add_argument("--map-width", type=float)
+    parser.add_argument("--map-height", type=float)
+    parser.add_argument("--map-altitude", type=float)
+    parser.add_argument("--obstacle-inflation", type=float)
     parser.add_argument("--step-length", type=float, default=2.0)
     parser.add_argument("--max-steps", type=int, default=320)
     parser.add_argument("--goal-radius", type=float, default=3.0)
     parser.add_argument("--default-altitude", type=float, default=8.0)
     parser.add_argument("--trajectory-dt", type=float, default=0.5)
-    parser.add_argument("--max-speed", type=float, default=8.0)
-    parser.add_argument("--max-acceleration", type=float, default=3.0)
-    parser.add_argument("--max-jerk", type=float, default=12.0)
+    parser.add_argument("--max-horizontal-speed", type=float, default=23.0)
+    parser.add_argument("--max-speed", type=float, default=23.18, help="maximum combined 3D speed")
+    parser.add_argument("--max-climb-speed", type=float, default=2.85)
+    parser.add_argument("--max-descent-speed", type=float, default=1.65)
+    parser.add_argument("--max-climb-angle", type=float, default=90.0, help="degrees")
+    parser.add_argument("--max-acceleration", type=float, default=15.5, help="measured peak acceleration")
+    parser.add_argument(
+        "--normal-acceleration",
+        type=float,
+        default=3.0,
+        help="normal-flight acceleration command limit (conservative end of the measured 3-5 m/s^2 range)",
+    )
+    parser.add_argument("--max-deceleration", type=float, default=3.09)
+    parser.add_argument("--max-jerk", type=float, default=78.0, help="smoothed jerk limit")
+    parser.add_argument("--raw-max-jerk", type=float, default=142.0, help="raw-log peak for reference")
     parser.add_argument("--goal-speed-tolerance", type=float, default=1.0)
     parser.add_argument("--smoothing-iterations", type=int, default=1)
     parser.add_argument(
@@ -91,8 +107,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epsilon-end", type=float, default=0.05)
     parser.add_argument("--epsilon-decay", type=float, default=350.0)
 
-    parser.add_argument("--output-dir", type=Path, default=Path("outputs"))
-    parser.add_argument("--save-model", type=Path, default=Path("outputs/wujing_airfield_dqn.pt"))
+    parser.add_argument("--output-root", type=Path, default=Path("outputs"))
+    parser.add_argument("--output-dir", type=Path, help="override this scene's run-results directory")
+    parser.add_argument("--save-model", type=Path, help="override this scene's checkpoint path")
     parser.add_argument("--load-model", type=Path)
     parser.add_argument("--fresh-start", action="store_true", help="do not auto-load the previous checkpoint")
     parser.add_argument("--no-plots", action="store_true")
@@ -103,7 +120,9 @@ def parse_args() -> argparse.Namespace:
 
 def make_config(args: argparse.Namespace) -> UAVEnvConfig:
     """根据命令行参数生成三维环境配置。"""
-    return UAVEnvConfig(
+    scene = get_training_scene(args.scene)
+    return scene.make_config(
+        obstacle_inflation=args.obstacle_inflation,
         map_x_min=args.map_x_min,
         map_y_min=args.map_y_min,
         map_width=args.map_width,
@@ -113,22 +132,18 @@ def make_config(args: argparse.Namespace) -> UAVEnvConfig:
         max_steps=args.max_steps,
         goal_radius=args.goal_radius,
         trajectory_dt=args.trajectory_dt,
+        max_horizontal_speed=args.max_horizontal_speed,
         max_speed=args.max_speed,
+        max_climb_speed=args.max_climb_speed,
+        max_descent_speed=args.max_descent_speed,
+        max_climb_angle_deg=args.max_climb_angle,
         max_acceleration=args.max_acceleration,
+        normal_acceleration=args.normal_acceleration,
+        max_deceleration=args.max_deceleration,
         max_jerk=args.max_jerk,
+        raw_max_jerk=args.raw_max_jerk,
         goal_speed_tolerance=args.goal_speed_tolerance,
         smoothing_iterations=args.smoothing_iterations,
-        obstacle_inflation=args.obstacle_inflation,
-        obstacles=wujing_airfield_obstacles(args.obstacle_inflation),
-    )
-
-
-def ground_center_start(config: UAVEnvConfig) -> tuple[float, float, float]:
- #起点设置为地图中央地面
-    return (
-        config.map_x_min + config.map_width / 2.0,
-        config.map_y_min + config.map_height / 2.0,
-        config.uav_radius + 1e-3,
     )
 
 
@@ -173,19 +188,39 @@ def restore_rng_state(state: dict[str, object] | None) -> None:
 def main() -> None:
     """组织完整三维训练和评估流程。"""
     args = parse_args()
+    if args.list_scenes:
+        for key in available_scene_keys():
+            scene = get_training_scene(key)
+            print(f"{key}: {scene.display_name} ({scene.scene_name})")
+        return
+
     started = time.time()
     fix_seed(args.seed)
 
-    output_dir: Path = args.output_dir
+    scene = get_training_scene(args.scene)
+    scene_output_root = args.output_root / scene.key
+    output_dir: Path = args.output_dir or scene_output_root / "runs"
+    save_model: Path = args.save_model or scene_output_root / "models" / f"{scene.key}_dqn.pt"
     output_dir.mkdir(parents=True, exist_ok=True)
     run_output_dir = make_run_output_dir(output_dir)
 
     config = make_config(args)
-    default_z = min(max(args.default_altitude, 1.0), args.map_altitude - 1.0)
+    default_z = min(max(args.default_altitude, 1.0), config.map_altitude - 1.0)
     start = optional_point_3d(args.start_x, args.start_y, args.start_z, "start", default_z)
     if start is None:
-        start = ground_center_start(config)
+        start = scene.default_start(config)
     goal = optional_point_3d(args.target_x, args.target_y, args.target_z, "target", default_z)
+
+    run_metadata = {
+        "scene_key": scene.key,
+        "scene_display_name": scene.display_name,
+        "checkpoint_path": str(save_model),
+        "config": config_to_dict(config),
+    }
+    (run_output_dir / "run_config.json").write_text(
+        json.dumps(run_metadata, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
     env = UAVPathPlanningEnv(config=config, seed=args.seed)
     agent = DQNAgent(
@@ -208,14 +243,43 @@ def main() -> None:
         f"y[{env.map_min[1]}, {env.map_max[1]}], z[{env.map_min[2]}, {env.map_max[2]}], "
         f"obstacles={len(env.config.obstacles)}, inflation={env.config.obstacle_inflation}m"
     )
+    print(
+        "dynamics="
+        f"horizontal_speed<={config.max_horizontal_speed}m/s, "
+        f"3d_speed<={config.max_speed}m/s, "
+        f"climb<={config.max_climb_speed}m/s, "
+        f"descent<={config.max_descent_speed}m/s, "
+        f"climb_angle<={config.max_climb_angle_deg}deg, "
+        f"climb_angle_at_max_horizontal_speed="
+        f"{config.climb_angle_at_max_horizontal_speed_deg:.1f}deg, "
+        f"normal_acceleration<={config.normal_acceleration}m/s^2, "
+        f"peak_acceleration<={config.max_acceleration}m/s^2, "
+        f"deceleration<={config.max_deceleration}m/s^2, "
+        f"jerk<={config.max_jerk}m/s^3"
+    )
 
     resume_model = args.load_model
-    if resume_model is None and not args.fresh_start and args.save_model and args.save_model.exists():
-        resume_model = args.save_model
+    if resume_model is None and not args.fresh_start and save_model.exists():
+        resume_model = save_model
 
     trained_episodes = 0
     if resume_model:
         checkpoint = agent.load(resume_model)
+        checkpoint_scene_key = checkpoint.get("scene_key")
+        checkpoint_config = checkpoint.get("config")
+        checkpoint_scene_name = (
+            checkpoint_config.get("scene_name")
+            if isinstance(checkpoint_config, dict)
+            else None
+        )
+        if checkpoint_scene_key not in (None, scene.key) or checkpoint_scene_name not in (
+            None,
+            config.scene_name,
+        ):
+            raise ValueError(
+                f"Checkpoint {resume_model} belongs to a different scene; "
+                f"selected scene is {scene.key}."
+            )
         trained_episodes = int(checkpoint.get("trained_episodes", 0))
         restore_rng_state(checkpoint.get("rng_state"))
         print(f"Loaded model from {resume_model}")
@@ -238,19 +302,20 @@ def main() -> None:
             episode_offset=trained_episodes,
         )
         trained_episodes += args.episodes
-        if args.save_model:
-            args.save_model.parent.mkdir(parents=True, exist_ok=True)
+        if save_model:
+            save_model.parent.mkdir(parents=True, exist_ok=True)
             checkpoint_state = {
                 "trained_episodes": trained_episodes,
                 "epsilon_start": args.epsilon_start,
                 "epsilon_end": args.epsilon_end,
                 "epsilon_decay": args.epsilon_decay,
                 "seed": args.seed,
+                "scene_key": scene.key,
                 "rng_state": capture_rng_state(),
             }
-            agent.save(args.save_model, config=config, extra_state=checkpoint_state)
-            print(f"Saved model to {args.save_model}")
-            run_model_path = run_output_dir / args.save_model.name
+            agent.save(save_model, config=config, extra_state=checkpoint_state)
+            print(f"Saved model to {save_model}")
+            run_model_path = run_output_dir / save_model.name
             agent.save(run_model_path, config=config, extra_state=checkpoint_state)
             print(f"Saved run model to {run_model_path}")
 
@@ -294,7 +359,12 @@ def main() -> None:
             f"duration={timed_trajectory.total_time:.2f}s, "
             f"length={timed_trajectory.total_length:.2f}m, "
             f"max_speed={timed_trajectory.max_speed:.2f}m/s, "
-            f"max_acceleration={timed_trajectory.max_acceleration:.2f}m/s^2"
+            f"max_horizontal_speed={validation.max_horizontal_speed:.2f}m/s, "
+            f"max_climb_speed={validation.max_climb_speed:.2f}m/s, "
+            f"max_descent_speed={validation.max_descent_speed:.2f}m/s, "
+            f"max_acceleration={timed_trajectory.max_acceleration:.2f}m/s^2, "
+            f"max_deceleration={validation.max_deceleration:.2f}m/s^2, "
+            f"max_jerk={validation.max_jerk:.2f}m/s^3"
         )
         print(
             "trajectory validation: "

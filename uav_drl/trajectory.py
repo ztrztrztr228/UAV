@@ -185,7 +185,7 @@ def _time_grid(duration: float, dt: float) -> np.ndarray:
 def path_to_timed_trajectory(
     path: list[np.ndarray] | tuple[np.ndarray, ...] | np.ndarray,
     dt: float = 1.0,
-    max_speed: float = 8.0,
+    max_speed: float = 23.18,
     max_acceleration: float = 3.0,
     smoothing_iterations: int = 1,
 ) -> TimedTrajectory:

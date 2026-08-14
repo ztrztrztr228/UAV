@@ -27,10 +27,20 @@ class TrajectoryValidationResult:
     collision_free: bool
     within_bounds: bool
     max_speed: float
+    max_horizontal_speed: float
+    max_climb_speed: float
+    max_descent_speed: float
+    max_climb_angle_deg: float
     max_acceleration: float
+    max_deceleration: float
     max_jerk: float
     speed_limit_satisfied: bool
+    horizontal_speed_limit_satisfied: bool
+    climb_speed_limit_satisfied: bool
+    descent_speed_limit_satisfied: bool
+    climb_angle_limit_satisfied: bool
     acceleration_limit_satisfied: bool
+    deceleration_limit_satisfied: bool
     jerk_limit_satisfied: bool
     dynamics_consistent: bool
     max_position_integration_error: float
@@ -135,9 +145,22 @@ def validate_timed_trajectory(
     max_deviation = float(deviations[max_index]) if len(deviations) else 0.0
     mean_deviation = float(np.mean(deviations)) if len(deviations) else 0.0
     speed_limit = env.config.max_speed if max_speed is None else float(max_speed)
+    horizontal_speed_limit = min(env.config.max_horizontal_speed, speed_limit)
+    climb_speed_limit = min(env.config.max_climb_speed, speed_limit)
+    descent_speed_limit = min(env.config.max_descent_speed, speed_limit)
+    climb_angle_limit = env.config.max_climb_angle_deg
     acceleration_limit = env.config.max_acceleration if max_acceleration is None else float(max_acceleration)
+    deceleration_limit = env.config.max_deceleration
     jerk_limit = env.config.max_jerk if max_jerk is None else float(max_jerk)
-    if min(speed_limit, acceleration_limit, jerk_limit) <= 0.0:
+    if min(
+        speed_limit,
+        horizontal_speed_limit,
+        climb_speed_limit,
+        descent_speed_limit,
+        acceleration_limit,
+        deceleration_limit,
+        jerk_limit,
+    ) <= 0.0:
         raise ValueError("Dynamics limits must be positive.")
 
     if len(trajectory.time) > 1:
@@ -149,16 +172,32 @@ def validate_timed_trajectory(
         expected_velocity_delta = trajectory.acceleration[1:] * dt[:, None]
         velocity_errors = np.linalg.norm(np.diff(trajectory.velocity, axis=0) - expected_velocity_delta, axis=1)
         jerk_values = np.linalg.norm(np.diff(trajectory.acceleration, axis=0) / dt[:, None], axis=1)
+        deceleration_values = -np.diff(trajectory.speed) / dt
     else:
         position_errors = np.zeros(1, dtype=np.float64)
         velocity_errors = np.zeros(1, dtype=np.float64)
         jerk_values = np.zeros(1, dtype=np.float64)
+        deceleration_values = np.zeros(1, dtype=np.float64)
     max_position_error = float(position_errors.max(initial=0.0))
     max_velocity_error = float(velocity_errors.max(initial=0.0))
     observed_max_jerk = float(jerk_values.max(initial=0.0))
+    observed_max_deceleration = float(deceleration_values.max(initial=0.0))
+    horizontal_speeds = np.linalg.norm(trajectory.velocity[:, :2], axis=1)
+    climb_speeds = np.maximum(trajectory.velocity[:, 2], 0.0)
+    descent_speeds = np.maximum(-trajectory.velocity[:, 2], 0.0)
+    climb_angles = np.degrees(np.arctan2(climb_speeds, horizontal_speeds))
+    observed_max_horizontal_speed = float(horizontal_speeds.max(initial=0.0))
+    observed_max_climb_speed = float(climb_speeds.max(initial=0.0))
+    observed_max_descent_speed = float(descent_speeds.max(initial=0.0))
+    observed_max_climb_angle = float(climb_angles.max(initial=0.0))
     dynamics_consistent = max(max_position_error, max_velocity_error) <= integration_tolerance
     speed_ok = trajectory.max_speed <= speed_limit + integration_tolerance
+    horizontal_speed_ok = observed_max_horizontal_speed <= horizontal_speed_limit + integration_tolerance
+    climb_speed_ok = observed_max_climb_speed <= climb_speed_limit + integration_tolerance
+    descent_speed_ok = observed_max_descent_speed <= descent_speed_limit + integration_tolerance
+    climb_angle_ok = observed_max_climb_angle <= climb_angle_limit + integration_tolerance
     acceleration_ok = trajectory.max_acceleration <= acceleration_limit + integration_tolerance
+    deceleration_ok = observed_max_deceleration <= deceleration_limit + integration_tolerance
     jerk_ok = observed_max_jerk <= jerk_limit + integration_tolerance
 
     goal_point = env.goal if goal is None else np.asarray(goal, dtype=np.float64)
@@ -177,7 +216,12 @@ def validate_timed_trajectory(
             collision_free,
             within_bounds,
             speed_ok,
+            horizontal_speed_ok,
+            climb_speed_ok,
+            descent_speed_ok,
+            climb_angle_ok,
             acceleration_ok,
+            deceleration_ok,
             jerk_ok,
             dynamics_consistent,
             goal_reached,
@@ -194,10 +238,20 @@ def validate_timed_trajectory(
         collision_free=bool(collision_free),
         within_bounds=bool(within_bounds),
         max_speed=float(trajectory.max_speed),
+        max_horizontal_speed=observed_max_horizontal_speed,
+        max_climb_speed=observed_max_climb_speed,
+        max_descent_speed=observed_max_descent_speed,
+        max_climb_angle_deg=observed_max_climb_angle,
         max_acceleration=float(trajectory.max_acceleration),
+        max_deceleration=observed_max_deceleration,
         max_jerk=observed_max_jerk,
         speed_limit_satisfied=bool(speed_ok),
+        horizontal_speed_limit_satisfied=bool(horizontal_speed_ok),
+        climb_speed_limit_satisfied=bool(climb_speed_ok),
+        descent_speed_limit_satisfied=bool(descent_speed_ok),
+        climb_angle_limit_satisfied=bool(climb_angle_ok),
         acceleration_limit_satisfied=bool(acceleration_ok),
+        deceleration_limit_satisfied=bool(deceleration_ok),
         jerk_limit_satisfied=bool(jerk_ok),
         dynamics_consistent=bool(dynamics_consistent),
         max_position_integration_error=max_position_error,

@@ -31,10 +31,22 @@ from uav_drl.actions import ACTION_NAMES
 from uav_drl.agent import DQNAgent
 from uav_drl.config import DEFAULT_SEED, UAVEnvConfig, config_to_dict
 from uav_drl.environment import UAVPathPlanningEnv
+from uav_drl.qgc_plan import (
+    FIRMWARE_TYPES,
+    build_qgc_plan,
+    prepare_qgc_waypoints,
+    qgc_autoload_path,
+    save_qgc_plan,
+)
 from uav_drl.scenes import available_scene_keys, get_training_scene
+from uav_drl.trajectory import TimedTrajectory
 from uav_drl.training import TrainHistory, evaluate_agent, train_dqn
 from uav_drl.utils import fix_seed, optional_point_3d
-from uav_drl.validation import save_validation_json, validate_timed_trajectory
+from uav_drl.validation import (
+    TrajectoryValidationResult,
+    save_validation_json,
+    validate_timed_trajectory,
+)
 from uav_drl.visualization import (
     plot_training,
     plot_trajectory,
@@ -83,6 +95,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--raw-max-jerk", type=float, default=142.0, help="raw-log peak for reference")
     parser.add_argument("--goal-speed-tolerance", type=float, default=1.0)
     parser.add_argument("--smoothing-iterations", type=int, default=1)
+    reward_group = parser.add_argument_group("trajectory reward shaping")
+    reward_group.add_argument("--extra-altitude-penalty-scale", type=float, default=0.12)
+    reward_group.add_argument("--extra-altitude-margin", type=float, default=3.0)
+    reward_group.add_argument("--detour-penalty-scale", type=float, default=0.35)
+    reward_group.add_argument("--turn-penalty-scale", type=float, default=0.20)
+    reward_group.add_argument("--turn-speed-threshold", type=float, default=0.50)
+    reward_group.add_argument("--goal-guidance-distance", type=float, default=60.0)
+    reward_group.add_argument("--goal-altitude-penalty-scale", type=float, default=0.08)
+    reward_group.add_argument("--vertical-speed-guidance-scale", type=float, default=0.30)
+    reward_group.add_argument("--vertical-guidance-time", type=float, default=4.0)
     parser.add_argument(
         "--trajectory-deviation-tolerance",
         type=float,
@@ -115,7 +137,74 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-plots", action="store_true")
     parser.add_argument("--visualize", action="store_true")
     parser.add_argument("--device", default=None, help="cpu, cuda, or auto when omitted")
-    return parser.parse_args()
+
+    qgc = parser.add_argument_group("QGroundControl Plan export")
+    qgc.add_argument(
+        "--export-qgc-plan",
+        action="store_true",
+        help="export a validated trajectory as qgc_mission.plan",
+    )
+    qgc.add_argument("--qgc-origin-lat-wgs84", type=float, help="WGS-84 latitude of local ENU (0,0,0)")
+    qgc.add_argument("--qgc-origin-lon-wgs84", type=float, help="WGS-84 longitude of local ENU (0,0,0)")
+    qgc.add_argument("--qgc-origin-alt-amsl", type=float, help="AMSL altitude in metres of local ENU z=0")
+    qgc.add_argument("--qgc-firmware", choices=tuple(FIRMWARE_TYPES), default="px4")
+    qgc.add_argument("--qgc-system-id", type=int, default=1, help="vehicle MAVLink system id for AutoLoad#.plan")
+    qgc.add_argument(
+        "--qgc-autoload-dir",
+        type=Path,
+        help="QGC Application Load/Save Path; writes AutoLoad<system-id>.plan",
+    )
+    qgc.add_argument("--qgc-takeoff-altitude", type=float, default=5.0)
+    qgc.add_argument("--qgc-simplify-tolerance", type=float, default=1.0)
+    qgc.add_argument("--qgc-max-segment-length", type=float, default=25.0)
+    qgc.add_argument("--qgc-acceptance-radius", type=float, default=2.0)
+    qgc.add_argument("--qgc-hover-speed", type=float, default=5.0)
+    qgc.add_argument("--qgc-cruise-speed", type=float, default=15.0)
+    qgc.add_argument("--qgc-end-action", choices=("none", "rtl", "land"), default="none")
+
+    args = parser.parse_args()
+    if args.qgc_autoload_dir is not None and not args.export_qgc_plan:
+        parser.error("--qgc-autoload-dir requires --export-qgc-plan")
+    if args.export_qgc_plan:
+        required = {
+            "--qgc-origin-lat-wgs84": args.qgc_origin_lat_wgs84,
+            "--qgc-origin-lon-wgs84": args.qgc_origin_lon_wgs84,
+            "--qgc-origin-alt-amsl": args.qgc_origin_alt_amsl,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            parser.error("QGC export requires " + ", ".join(missing))
+        numeric_values = (
+            args.qgc_origin_lat_wgs84,
+            args.qgc_origin_lon_wgs84,
+            args.qgc_origin_alt_amsl,
+            args.qgc_takeoff_altitude,
+            args.qgc_simplify_tolerance,
+            args.qgc_max_segment_length,
+            args.qgc_acceptance_radius,
+            args.qgc_hover_speed,
+            args.qgc_cruise_speed,
+        )
+        if not all(np.isfinite(value) for value in numeric_values):
+            parser.error("QGC coordinates and flight parameters must be finite")
+        if not -90.0 <= args.qgc_origin_lat_wgs84 <= 90.0:
+            parser.error("--qgc-origin-lat-wgs84 must be in [-90, 90]")
+        if not -180.0 <= args.qgc_origin_lon_wgs84 <= 180.0:
+            parser.error("--qgc-origin-lon-wgs84 must be in [-180, 180]")
+        if not 1 <= args.qgc_system_id <= 255:
+            parser.error("--qgc-system-id must be in [1, 255]")
+        if args.qgc_takeoff_altitude <= 0.0:
+            parser.error("--qgc-takeoff-altitude must be positive")
+        if args.qgc_simplify_tolerance < 0.0:
+            parser.error("--qgc-simplify-tolerance must be non-negative")
+        if min(
+            args.qgc_max_segment_length,
+            args.qgc_acceptance_radius,
+            args.qgc_hover_speed,
+            args.qgc_cruise_speed,
+        ) <= 0.0:
+            parser.error("QGC segment length, acceptance radius, and speeds must be positive")
+    return args
 
 
 def make_config(args: argparse.Namespace) -> UAVEnvConfig:
@@ -144,6 +233,15 @@ def make_config(args: argparse.Namespace) -> UAVEnvConfig:
         raw_max_jerk=args.raw_max_jerk,
         goal_speed_tolerance=args.goal_speed_tolerance,
         smoothing_iterations=args.smoothing_iterations,
+        extra_altitude_penalty_scale=args.extra_altitude_penalty_scale,
+        extra_altitude_margin=args.extra_altitude_margin,
+        detour_penalty_scale=args.detour_penalty_scale,
+        turn_penalty_scale=args.turn_penalty_scale,
+        turn_speed_threshold=args.turn_speed_threshold,
+        goal_guidance_distance=args.goal_guidance_distance,
+        goal_altitude_penalty_scale=args.goal_altitude_penalty_scale,
+        vertical_speed_guidance_scale=args.vertical_speed_guidance_scale,
+        vertical_guidance_time=args.vertical_guidance_time,
     )
 
 
@@ -185,6 +283,82 @@ def restore_rng_state(state: dict[str, object] | None) -> None:
         torch.cuda.set_rng_state_all(state["torch_cuda"])
 
 
+def _mission_polyline_is_collision_free(env: UAVPathPlanningEnv, points: np.ndarray) -> bool:
+    """Check the straight segments that the autopilot will fly between QGC items."""
+    return all(
+        not env._segment_in_collision(start, end)
+        for start, end in zip(points[:-1], points[1:])
+    )
+
+
+def export_qgc_outputs(
+    args: argparse.Namespace,
+    env: UAVPathPlanningEnv,
+    trajectory: TimedTrajectory,
+    validation: TrajectoryValidationResult,
+    run_output_dir: Path,
+) -> list[Path]:
+    """Export a validated trajectory to the run directory and optional QGC AutoLoad path."""
+    if not validation.passed:
+        print("Skipped QGC Plan export because trajectory validation did not pass.")
+        return []
+
+    takeoff_point, waypoints = prepare_qgc_waypoints(
+        trajectory.position,
+        takeoff_altitude_m=args.qgc_takeoff_altitude,
+        simplification_tolerance_m=args.qgc_simplify_tolerance,
+        max_segment_length_m=args.qgc_max_segment_length,
+    )
+
+    def mission_polyline_points() -> np.ndarray:
+        points = np.vstack([trajectory.position[0], takeoff_point, waypoints])
+        if args.qgc_end_action == "land":
+            landing_point = waypoints[-1].copy()
+            landing_point[2] = env.config.uav_radius + 1e-3
+            points = np.vstack([points, landing_point])
+        return points
+
+    mission_polyline = mission_polyline_points()
+    if not _mission_polyline_is_collision_free(env, mission_polyline):
+        print("Simplified QGC path was not collision-free; retrying without geometric tolerance.")
+        takeoff_point, waypoints = prepare_qgc_waypoints(
+            trajectory.position,
+            takeoff_altitude_m=args.qgc_takeoff_altitude,
+            simplification_tolerance_m=0.0,
+            max_segment_length_m=args.qgc_max_segment_length,
+        )
+        mission_polyline = mission_polyline_points()
+        if not _mission_polyline_is_collision_free(env, mission_polyline):
+            raise ValueError(
+                "QGC mission export refused: straight waypoint segments intersect an obstacle or map boundary."
+            )
+
+    plan = build_qgc_plan(
+        home_point_enu=trajectory.position[0],
+        takeoff_point_enu=takeoff_point,
+        waypoint_points_enu=waypoints,
+        origin_latitude_wgs84=args.qgc_origin_lat_wgs84,
+        origin_longitude_wgs84=args.qgc_origin_lon_wgs84,
+        origin_altitude_amsl_m=args.qgc_origin_alt_amsl,
+        firmware=args.qgc_firmware,
+        hover_speed_m_s=args.qgc_hover_speed,
+        cruise_speed_m_s=args.qgc_cruise_speed,
+        acceptance_radius_m=args.qgc_acceptance_radius,
+        end_action=args.qgc_end_action,
+    )
+
+    output_paths = [save_qgc_plan(plan, run_output_dir / "qgc_mission.plan")]
+    print(
+        f"Saved QGC Plan to {output_paths[0]} "
+        f"({len(waypoints)} waypoints + takeoff, original samples={len(trajectory.position)})"
+    )
+    if args.qgc_autoload_dir is not None:
+        autoload_path = qgc_autoload_path(args.qgc_autoload_dir, args.qgc_system_id)
+        output_paths.append(save_qgc_plan(plan, autoload_path))
+        print(f"Updated QGC AutoLoad Plan at {autoload_path}")
+    return output_paths
+
+
 def main() -> None:
     """组织完整三维训练和评估流程。"""
     args = parse_args()
@@ -217,6 +391,22 @@ def main() -> None:
         "checkpoint_path": str(save_model),
         "config": config_to_dict(config),
     }
+    if args.export_qgc_plan:
+        run_metadata["qgc_export"] = {
+            "origin_latitude_wgs84": args.qgc_origin_lat_wgs84,
+            "origin_longitude_wgs84": args.qgc_origin_lon_wgs84,
+            "origin_altitude_amsl_m": args.qgc_origin_alt_amsl,
+            "firmware": args.qgc_firmware,
+            "system_id": args.qgc_system_id,
+            "autoload_directory": str(args.qgc_autoload_dir) if args.qgc_autoload_dir else None,
+            "takeoff_altitude_m": args.qgc_takeoff_altitude,
+            "simplification_tolerance_m": args.qgc_simplify_tolerance,
+            "max_segment_length_m": args.qgc_max_segment_length,
+            "acceptance_radius_m": args.qgc_acceptance_radius,
+            "hover_speed_m_s": args.qgc_hover_speed,
+            "cruise_speed_m_s": args.qgc_cruise_speed,
+            "end_action": args.qgc_end_action,
+        }
     (run_output_dir / "run_config.json").write_text(
         json.dumps(run_metadata, indent=2, ensure_ascii=False),
         encoding="utf-8",
@@ -257,6 +447,16 @@ def main() -> None:
         f"deceleration<={config.max_deceleration}m/s^2, "
         f"jerk<={config.max_jerk}m/s^3"
     )
+    print(
+        f"reward_v{config.reward_shaping_version}="
+        f"extra_altitude={config.extra_altitude_penalty_scale}/m, "
+        f"altitude_margin={config.extra_altitude_margin}m, "
+        f"detour={config.detour_penalty_scale}/m, "
+        f"turn={config.turn_penalty_scale}/pi_rad, "
+        f"goal_altitude={config.goal_altitude_penalty_scale}/m, "
+        f"vertical_guidance={config.vertical_speed_guidance_scale}, "
+        f"guidance_distance={config.goal_guidance_distance}m"
+    )
 
     resume_model = args.load_model
     if resume_model is None and not args.fresh_start and save_model.exists():
@@ -279,6 +479,17 @@ def main() -> None:
             raise ValueError(
                 f"Checkpoint {resume_model} belongs to a different scene; "
                 f"selected scene is {scene.key}."
+            )
+        checkpoint_reward_version = (
+            checkpoint_config.get("reward_shaping_version", 1)
+            if isinstance(checkpoint_config, dict)
+            else 1
+        )
+        if checkpoint_reward_version != config.reward_shaping_version:
+            raise ValueError(
+                f"Checkpoint {resume_model} uses reward shaping version "
+                f"{checkpoint_reward_version}, but the current environment uses "
+                f"version {config.reward_shaping_version}. Start a new model with --fresh-start."
             )
         trained_episodes = int(checkpoint.get("trained_episodes", 0))
         restore_rng_state(checkpoint.get("rng_state"))
@@ -376,6 +587,8 @@ def main() -> None:
             f"dynamics_consistent={validation.dynamics_consistent}, "
             f"goal_reached={validation.goal_reached}"
         )
+        if args.export_qgc_plan:
+            export_qgc_outputs(args, env, timed_trajectory, validation, run_output_dir)
 
     if (args.visualize or not args.no_plots) and best_trajectory:
         plot_trajectory(env, best_trajectory, run_output_dir / "best_trajectory.png")

@@ -172,13 +172,25 @@ class UAVEnvConfig:
     min_start_goal_distance: float = 35.0
 
     # 奖励函数权重。
+    reward_shaping_version: int = 2
     progress_reward_scale: float = 6.0
     distance_penalty_scale: float = 0.25
     step_penalty: float = 0.03
     hover_penalty: float = 0.08
-    turn_penalty_scale: float = 0.04
+    # 转弯按相邻速度方向夹角/π扣分；绕路按“航段长度-目标进度”米数扣分。
+    turn_penalty_scale: float = 0.20
+    turn_speed_threshold: float = 0.50
+    detour_penalty_scale: float = 0.35
     proximity_penalty_scale: float = 1.0
+    # 保留极弱的绝对高度正则；主要使用相对合理高度走廊的额外高度惩罚。
     altitude_penalty_scale: float = 0.01
+    extra_altitude_penalty_scale: float = 0.12
+    extra_altitude_margin: float = 3.0
+    # 接近目标后逐渐跟踪目标高度和合理垂直速度。
+    goal_guidance_distance: float = 60.0
+    goal_altitude_penalty_scale: float = 0.08
+    vertical_speed_guidance_scale: float = 0.30
+    vertical_guidance_time: float = 4.0
     acceleration_penalty_scale: float = 0.06
     jerk_penalty_scale: float = 0.04
     speed_penalty_scale: float = 0.03

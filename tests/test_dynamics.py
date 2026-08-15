@@ -65,6 +65,34 @@ class DynamicsEnvironmentTests(unittest.TestCase):
         self.assertAlmostEqual(env._allowed_route_altitude(open_position), 13.0, places=6)
         self.assertAlmostEqual(env._allowed_route_altitude(over_building), 18.7, places=6)
 
+    def test_evaluation_goal_can_be_sampled_near_a_building(self) -> None:
+        obstacle = BoxObstacle(18.0, 8.0, 0.0, 22.0, 12.0, 15.0, "test_building")
+        env = UAVPathPlanningEnv(
+            make_config(obstacles=[obstacle], min_start_goal_distance=10.0)
+        )
+        env.reset(
+            start=(5, 5, 5),
+            seed=123,
+            goal_near_obstacle_probability=1.0,
+            goal_near_obstacle_min_clearance=2.0,
+            goal_near_obstacle_max_clearance=8.0,
+        )
+        self.assertEqual(env.goal_sampling_mode, "near_obstacle")
+        self.assertGreaterEqual(env.goal_obstacle_clearance, 2.0)
+        self.assertLessEqual(env.goal_obstacle_clearance, 8.0)
+        self.assertFalse(env._point_in_collision(env.goal))
+
+    def test_near_obstacle_goal_sampling_arguments_are_validated(self) -> None:
+        env = UAVPathPlanningEnv(make_config())
+        with self.assertRaises(ValueError):
+            env.reset(goal_near_obstacle_probability=1.1)
+        with self.assertRaises(ValueError):
+            env.reset(
+                goal_near_obstacle_probability=1.0,
+                goal_near_obstacle_min_clearance=10.0,
+                goal_near_obstacle_max_clearance=2.0,
+            )
+
     def test_route_shaping_reward_components_activate(self) -> None:
         env = UAVPathPlanningEnv(make_config(goal_radius=0.01, goal_speed_tolerance=0.0))
         env.reset(start=(10, 10, 10), goal=(30, 10, 15))

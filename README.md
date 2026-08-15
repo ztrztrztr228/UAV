@@ -68,6 +68,27 @@ python .\uav_drl_path_planning.py --scene spring_garden_phase2 --episodes 1500 -
 默认外扩 2 m；吴泾试飞场仍使用 8 m 外扩量。可用 `--obstacle-inflation`
 覆盖当前场景的默认值。
 
+### 建筑附近目标评估
+
+训练阶段仍使用原来的均匀随机目标。训练完成后的随机评估默认有 70% 的目标
+采样在建筑外侧 2--12 m 的安全邻域，以覆盖楼旁接近、绕障和末端减速等现实
+情况；其余 30% 保持全地图均匀采样。评估日志会输出 `goal_sample`、
+`goal_building_clearance`，汇总中会输出实际建筑邻近目标比例。
+
+```powershell
+# 所有随机评估目标均优先取在建筑附近
+python .\uav_drl_path_planning.py --scene wujing_airfield --skip-train `
+  --eval-episodes 50 --eval-near-obstacle-probability 1.0
+
+# 恢复为全部均匀随机目标
+python .\uav_drl_path_planning.py --scene wujing_airfield --skip-train `
+  --eval-episodes 50 --eval-near-obstacle-probability 0.0
+```
+
+可通过 `--eval-near-obstacle-min-clearance` 和
+`--eval-near-obstacle-max-clearance` 修改建筑净空范围。明确指定
+`--target-x/--target-y` 时固定目标优先，不再进行随机目标采样。
+
 默认动力学参数来自飞行日志：最大水平速度 23.0 m/s、最大三维合速度
 23.18 m/s、最大上升速度 2.85 m/s、最大下降速度 1.65 m/s、最大爬升角
 90°、瞬时峰值加速度 15.5 m/s²、最大减速度 3.09 m/s²。正常飞行加速度

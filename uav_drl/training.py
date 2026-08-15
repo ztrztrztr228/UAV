@@ -128,6 +128,9 @@ def evaluate_agent(
     start: Sequence[float] | None = None,
     goal: Sequence[float] | None = None,
     seed: int = DEFAULT_SEED,
+    near_obstacle_goal_probability: float = 0.0,
+    near_obstacle_goal_min_clearance: float = 2.0,
+    near_obstacle_goal_max_clearance: float = 12.0,
 ) -> tuple[list[dict[str, object]], list[np.ndarray]]:
     """评估训练好的策略。
 
@@ -144,7 +147,14 @@ def evaluate_agent(
     best_score = -float("inf")
 
     for episode in range(episodes):
-        state = env.reset(start=start, goal=goal, seed=seed + 10_000 + episode)
+        state = env.reset(
+            start=start,
+            goal=goal,
+            seed=seed + 10_000 + episode,
+            goal_near_obstacle_probability=near_obstacle_goal_probability,
+            goal_near_obstacle_min_clearance=near_obstacle_goal_min_clearance,
+            goal_near_obstacle_max_clearance=near_obstacle_goal_max_clearance,
+        )
         total_reward = 0.0
         final_info: dict[str, object] = {}
 
@@ -171,11 +181,15 @@ def evaluate_agent(
             best_start = env.start.copy()
             best_goal = env.goal.copy()
 
+        goal_clearance = final_info.get("goal_obstacle_clearance")
+        goal_clearance_text = "n/a" if goal_clearance is None else f"{float(goal_clearance):.2f}m"
         print(
             f"eval {episode + 1}/{episodes}: "
             f"event={final_info['event']}, reward={total_reward:.2f}, "
             f"steps={final_info['steps']}, distance={final_info['distance_to_goal']:.2f}, "
-            f"path={final_info['path_length']:.2f}"
+            f"path={final_info['path_length']:.2f}, "
+            f"goal_sample={final_info.get('goal_sampling_mode', 'unknown')}, "
+            f"goal_building_clearance={goal_clearance_text}"
         )
 
     if results:
@@ -185,7 +199,9 @@ def evaluate_agent(
             "evaluation summary: "
             f"success_rate={np.mean(successes):.2%}, "
             f"collision_rate={np.mean(collisions):.2%}, "
-            f"avg_reward={np.mean([r['total_reward'] for r in results]):.2f}"
+            f"avg_reward={np.mean([r['total_reward'] for r in results]):.2f}, "
+            f"near_obstacle_goal_rate="
+            f"{np.mean([r.get('goal_sampling_mode') == 'near_obstacle' for r in results]):.2%}"
         )
     else:
         print("evaluation skipped: eval_episodes=0")

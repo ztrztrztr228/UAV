@@ -62,6 +62,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a dynamics-aware 3D DQN UAV trajectory planner.")
     parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument("--eval-episodes", type=int, default=5)
+    parser.add_argument(
+        "--eval-near-obstacle-probability",
+        type=float,
+        default=0.70,
+        help="fraction of random evaluation goals sampled near buildings",
+    )
+    parser.add_argument("--eval-near-obstacle-min-clearance", type=float, default=2.0)
+    parser.add_argument("--eval-near-obstacle-max-clearance", type=float, default=12.0)
     parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--scene", choices=available_scene_keys(), default="wujing_airfield")
@@ -163,6 +171,12 @@ def parse_args() -> argparse.Namespace:
     qgc.add_argument("--qgc-end-action", choices=("none", "rtl", "land"), default="none")
 
     args = parser.parse_args()
+    if not 0.0 <= args.eval_near_obstacle_probability <= 1.0:
+        parser.error("--eval-near-obstacle-probability must be in [0, 1]")
+    if args.eval_near_obstacle_min_clearance < 0.0:
+        parser.error("--eval-near-obstacle-min-clearance must be non-negative")
+    if args.eval_near_obstacle_max_clearance < args.eval_near_obstacle_min_clearance:
+        parser.error("--eval-near-obstacle-max-clearance must not be below the minimum")
     if args.qgc_autoload_dir is not None and not args.export_qgc_plan:
         parser.error("--qgc-autoload-dir requires --export-qgc-plan")
     if args.export_qgc_plan:
@@ -389,6 +403,11 @@ def main() -> None:
         "scene_key": scene.key,
         "scene_display_name": scene.display_name,
         "checkpoint_path": str(save_model),
+        "evaluation_goal_sampling": {
+            "near_obstacle_probability": args.eval_near_obstacle_probability,
+            "min_clearance_m": args.eval_near_obstacle_min_clearance,
+            "max_clearance_m": args.eval_near_obstacle_max_clearance,
+        },
         "config": config_to_dict(config),
     }
     if args.export_qgc_plan:
@@ -540,6 +559,9 @@ def main() -> None:
         start=start,
         goal=goal,
         seed=args.seed,
+        near_obstacle_goal_probability=args.eval_near_obstacle_probability,
+        near_obstacle_goal_min_clearance=args.eval_near_obstacle_min_clearance,
+        near_obstacle_goal_max_clearance=args.eval_near_obstacle_max_clearance,
     )
 
     if best_trajectory:

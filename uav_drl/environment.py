@@ -44,6 +44,8 @@ class UAVPathPlanningEnv:
         self.acceleration = np.zeros(3, dtype=np.float32)
         self.goal = np.zeros(3, dtype=np.float32)
         self.start = np.zeros(3, dtype=np.float32)
+        self.goal_sampling_mode = "uninitialized"
+        self.goal_obstacle_clearance = float("inf")
         self.steps = 0
         self.path_length = 0.0
         self.done = False
@@ -101,11 +103,40 @@ class UAVPathPlanningEnv:
         start: Sequence[float] | None = None,
         goal: Sequence[float] | None = None,
         seed: int | None = None,
+        goal_near_obstacle_probability: float = 0.0,
+        goal_near_obstacle_min_clearance: float = 2.0,
+        goal_near_obstacle_max_clearance: float = 12.0,
     ) -> np.ndarray:
+        if not 0.0 <= goal_near_obstacle_probability <= 1.0:
+            raise ValueError("goal_near_obstacle_probability must be in [0, 1].")
+        if goal_near_obstacle_min_clearance < 0.0:
+            raise ValueError("goal_near_obstacle_min_clearance must be non-negative.")
+        if goal_near_obstacle_max_clearance < goal_near_obstacle_min_clearance:
+            raise ValueError(
+                "goal_near_obstacle_max_clearance must not be below the minimum clearance."
+            )
         if seed is not None:
             self.rng = np.random.default_rng(seed)
         self.start = self._sample_free_point() if start is None else self._validate_free_point(start, "start")
-        self.goal = self._sample_goal_far_from(self.start) if goal is None else self._validate_free_point(goal, "goal")
+        if goal is not None:
+            self.goal = self._validate_free_point(goal, "goal")
+            self.goal_sampling_mode = "specified"
+        elif self.config.obstacles and self.rng.random() < goal_near_obstacle_probability:
+            near_goal = self._sample_goal_near_obstacle(
+                self.start,
+                goal_near_obstacle_min_clearance,
+                goal_near_obstacle_max_clearance,
+            )
+            if near_goal is None:
+                self.goal = self._sample_goal_far_from(self.start)
+                self.goal_sampling_mode = "uniform_fallback"
+            else:
+                self.goal = near_goal
+                self.goal_sampling_mode = "near_obstacle"
+        else:
+            self.goal = self._sample_goal_far_from(self.start)
+            self.goal_sampling_mode = "uniform"
+        self.goal_obstacle_clearance = self._nearest_obstacle_clearance(self.goal)
         self.position = self.start.copy()
         self.velocity = np.zeros(3, dtype=np.float32)
         self.acceleration = np.zeros(3, dtype=np.float32)
@@ -457,6 +488,22 @@ class UAVPathPlanningEnv:
                 return point
         raise RuntimeError("Could not sample a valid goal far from start.")
 
+    def _sample_goal_near_obstacle(
+        self,
+        start: np.ndarray,
+        min_clearance: float,
+        max_clearance: float,
+    ) -> np.ndarray | None:
+        """Sample a free goal in a requested shell around any building."""
+        for _ in range(10_000):
+            point = self._sample_free_point()
+            if np.linalg.norm(point - start) < self.config.min_start_goal_distance:
+                continue
+            clearance = self._nearest_obstacle_clearance(point)
+            if min_clearance <= clearance <= max_clearance:
+                return point
+        return None
+
     def _sample_free_point(self) -> np.ndarray:
         low = self.map_min + self.config.uav_radius
         high = self.map_max - self.config.uav_radius
@@ -510,6 +557,14 @@ class UAVPathPlanningEnv:
         )
         return max(0.0, min(boundary_clearance, obstacle_clearance) - self.config.uav_radius)
 
+    def _nearest_obstacle_clearance(self, point: np.ndarray) -> float:
+        """Return UAV-surface clearance to the nearest building, excluding map boundaries."""
+        obstacle_distance = min(
+            (obstacle.distance_to(point) for obstacle in self.config.obstacles),
+            default=float("inf"),
+        )
+        return max(0.0, obstacle_distance - self.config.uav_radius)
+
     def _info(
         self,
         event: str,
@@ -537,6 +592,12 @@ class UAVPathPlanningEnv:
             "commanded_acceleration": None if commanded_acceleration is None else commanded_acceleration.copy(),
             "speed_clipped": bool(speed_clipped),
             "goal": self.goal.copy(),
+            "goal_sampling_mode": self.goal_sampling_mode,
+            "goal_obstacle_clearance": (
+                float(self.goal_obstacle_clearance)
+                if np.isfinite(self.goal_obstacle_clearance)
+                else None
+            ),
             "reward": float(reward),
             "progress": float(progress),
             "reward_components": self.last_reward_components.copy(),

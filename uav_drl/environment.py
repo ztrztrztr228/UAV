@@ -17,8 +17,9 @@ class UAVPathPlanningEnv:
     """使用点质量模型的三维轨迹规划环境。
 
     动作为 26 个单位方向上的正常飞行加速度和一个零加速度动作。每一步先计算
-    ``v[k+1] = clip(v[k] + a[k] * dt)``，再用梯形积分更新位置。46 维状态由
-    位置、目标相对量、航向、速度、加速度、动力学裕度、雷达和时间进度组成。
+    ``v[k+1] = clip(v[k] + a[k] * dt)``，再用梯形积分更新位置。50 维状态由
+    位置、目标相对量、航向、速度、加速度、动力学裕度、雷达、时间进度和
+    提前制动特征组成。新增特征追加在旧 46 维状态末尾，以兼容旧 checkpoint。
     """
 
     def __init__(self, config: UAVEnvConfig | None = None, seed: int = DEFAULT_SEED) -> None:
@@ -27,7 +28,8 @@ class UAVPathPlanningEnv:
         self.rng = np.random.default_rng(seed)
         self.num_actions = len(ACTION_NAMES)
         self.lidar_dim = self.num_actions - 1
-        self.state_dim = 3 + 3 + 1 + 3 + 3 + 3 + 3 + self.lidar_dim + 1
+        self.early_braking_dim = 4
+        self.state_dim = 3 + 3 + 1 + 3 + 3 + 3 + 3 + self.lidar_dim + 1 + self.early_braking_dim
         self.map_size = np.asarray(
             [self.config.map_width, self.config.map_height, self.config.map_altitude],
             dtype=np.float32,
@@ -38,6 +40,15 @@ class UAVPathPlanningEnv:
         )
         self.map_max = self.map_min + self.map_size
         self.max_distance = float(np.linalg.norm(self.map_size))
+        self._obstacle_mins = np.asarray(
+            [[item.xmin, item.ymin, item.zmin] for item in self.config.obstacles],
+            dtype=np.float32,
+        ).reshape(-1, 3)
+        self._obstacle_maxs = np.asarray(
+            [[item.xmax, item.ymax, item.zmax] for item in self.config.obstacles],
+            dtype=np.float32,
+        ).reshape(-1, 3)
+        self._last_lidar_scan = np.ones(self.lidar_dim, dtype=np.float32)
 
         self.position = np.zeros(3, dtype=np.float32)
         self.velocity = np.zeros(3, dtype=np.float32)
@@ -106,6 +117,10 @@ class UAVPathPlanningEnv:
         goal_near_obstacle_probability: float = 0.0,
         goal_near_obstacle_min_clearance: float = 2.0,
         goal_near_obstacle_max_clearance: float = 12.0,
+        goal_max_start_distance: float | None = None,
+        goal_altitude_min: float | None = None,
+        goal_altitude_max: float | None = None,
+        goal_near_obstacle_horizontal_only: bool = False,
     ) -> np.ndarray:
         if not 0.0 <= goal_near_obstacle_probability <= 1.0:
             raise ValueError("goal_near_obstacle_probability must be in [0, 1].")
@@ -114,6 +129,29 @@ class UAVPathPlanningEnv:
         if goal_near_obstacle_max_clearance < goal_near_obstacle_min_clearance:
             raise ValueError(
                 "goal_near_obstacle_max_clearance must not be below the minimum clearance."
+            )
+        altitude_min = (
+            self.config.uav_radius
+            if goal_altitude_min is None
+            else float(goal_altitude_min)
+        )
+        altitude_max = (
+            self.config.map_altitude - self.config.uav_radius
+            if goal_altitude_max is None
+            else float(goal_altitude_max)
+        )
+        if altitude_min < self.config.uav_radius or altitude_max > (
+            self.config.map_altitude - self.config.uav_radius
+        ):
+            raise ValueError("Goal altitude curriculum must stay inside the flyable map altitude.")
+        if altitude_max < altitude_min:
+            raise ValueError("goal_altitude_max must not be below goal_altitude_min.")
+        if (
+            goal_max_start_distance is not None
+            and goal_max_start_distance < self.config.min_start_goal_distance
+        ):
+            raise ValueError(
+                "goal_max_start_distance must not be below min_start_goal_distance."
             )
         if seed is not None:
             self.rng = np.random.default_rng(seed)
@@ -126,15 +164,29 @@ class UAVPathPlanningEnv:
                 self.start,
                 goal_near_obstacle_min_clearance,
                 goal_near_obstacle_max_clearance,
+                max_start_distance=goal_max_start_distance,
+                altitude_min=altitude_min,
+                altitude_max=altitude_max,
+                horizontal_only=goal_near_obstacle_horizontal_only,
             )
             if near_goal is None:
-                self.goal = self._sample_goal_far_from(self.start)
+                self.goal = self._sample_goal_far_from(
+                    self.start,
+                    max_start_distance=goal_max_start_distance,
+                    altitude_min=altitude_min,
+                    altitude_max=altitude_max,
+                )
                 self.goal_sampling_mode = "uniform_fallback"
             else:
                 self.goal = near_goal
                 self.goal_sampling_mode = "near_obstacle"
         else:
-            self.goal = self._sample_goal_far_from(self.start)
+            self.goal = self._sample_goal_far_from(
+                self.start,
+                max_start_distance=goal_max_start_distance,
+                altitude_min=altitude_min,
+                altitude_max=altitude_max,
+            )
             self.goal_sampling_mode = "uniform"
         self.goal_obstacle_clearance = self._nearest_obstacle_clearance(self.goal)
         self.position = self.start.copy()
@@ -157,28 +209,18 @@ class UAVPathPlanningEnv:
         if not 0 <= action < self.num_actions:
             raise ValueError(f"Action must be in [0, {self.num_actions - 1}], got {action}.")
 
-        dt = self.config.trajectory_dt
         previous_position = self.position.copy()
         previous_velocity = self.velocity.copy()
         previous_acceleration = self.acceleration.copy()
         previous_distance = self.distance_to_goal()
-        commanded_acceleration = self._limit_commanded_acceleration(
-            ACTION_DIRECTIONS[action] * self.config.normal_acceleration,
-            previous_velocity,
-        )
-        acceleration_delta = commanded_acceleration - previous_acceleration
-        max_acceleration_delta = self.config.max_jerk * dt
-        acceleration_delta_norm = float(np.linalg.norm(acceleration_delta))
-        if acceleration_delta_norm > max_acceleration_delta:
-            commanded_acceleration = previous_acceleration + acceleration_delta * (
-                max_acceleration_delta / acceleration_delta_norm
-            )
-
-        unconstrained_velocity = previous_velocity + commanded_acceleration * dt
-        next_velocity = self._limit_velocity(unconstrained_velocity)
-        clipped_velocity = float(np.linalg.norm(unconstrained_velocity - next_velocity))
-        effective_acceleration = (next_velocity - previous_velocity) / dt
-        candidate = previous_position + 0.5 * (previous_velocity + next_velocity) * dt
+        (
+            commanded_acceleration,
+            next_velocity,
+            effective_acceleration,
+            candidate,
+            clipped_velocity,
+        ) = self._predict_action_dynamics(action)
+        dt = self.config.trajectory_dt
 
         self.steps += 1
         if self._dynamics_segment_in_collision(
@@ -249,6 +291,41 @@ class UAVPathPlanningEnv:
             progress=progress,
             commanded_acceleration=commanded_acceleration,
             speed_clipped=clipped_velocity > 1e-9,
+        )
+
+    def _predict_action_dynamics(
+        self,
+        action: int,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
+        """Predict one action with exactly the same dynamics used by :meth:`step`."""
+        action = int(action)
+        if not 0 <= action < self.num_actions:
+            raise ValueError(f"Action must be in [0, {self.num_actions - 1}], got {action}.")
+
+        dt = self.config.trajectory_dt
+        commanded_acceleration = self._limit_commanded_acceleration(
+            ACTION_DIRECTIONS[action] * self.config.normal_acceleration,
+            self.velocity,
+        )
+        acceleration_delta = commanded_acceleration - self.acceleration
+        max_acceleration_delta = self.config.max_jerk * dt
+        acceleration_delta_norm = float(np.linalg.norm(acceleration_delta))
+        if acceleration_delta_norm > max_acceleration_delta:
+            commanded_acceleration = self.acceleration + acceleration_delta * (
+                max_acceleration_delta / acceleration_delta_norm
+            )
+
+        unconstrained_velocity = self.velocity + commanded_acceleration * dt
+        next_velocity = self._limit_velocity(unconstrained_velocity)
+        clipped_velocity = float(np.linalg.norm(unconstrained_velocity - next_velocity))
+        effective_acceleration = (next_velocity - self.velocity) / dt
+        candidate = self.position + 0.5 * (self.velocity + next_velocity) * dt
+        return (
+            commanded_acceleration.astype(np.float32),
+            next_velocity.astype(np.float32),
+            effective_acceleration.astype(np.float32),
+            candidate.astype(np.float32),
+            clipped_velocity,
         )
 
     def _limit_commanded_acceleration(
@@ -453,6 +530,9 @@ class UAVPathPlanningEnv:
         stopping_distance = float(np.linalg.norm(self.velocity)) ** 2 / (2.0 * self.config.max_deceleration)
         clearance = self._nearest_clearance(self.position)
         braking_margin = np.clip((clearance - stopping_distance) / self.config.lidar_range, -1.0, 1.0)
+        lidar_scan = self._lidar_scan()
+        self._last_lidar_scan = lidar_scan.copy()
+        early_braking_state = self._early_braking_state(lidar_scan, stopping_distance)
         state = np.concatenate(
             [
                 (self.position - self.map_min) / self.map_size,
@@ -462,29 +542,159 @@ class UAVPathPlanningEnv:
                 self.velocity / self.config.max_speed,
                 self.acceleration / acceleration_scale,
                 np.asarray([speed_ratio, acceleration_ratio, braking_margin], dtype=np.float32),
-                self._lidar_scan(),
+                lidar_scan,
                 np.asarray([self.steps / max(1, self.config.max_steps)], dtype=np.float32),
+                early_braking_state,
             ]
         )
         return state.astype(np.float32)
+
+    def _early_braking_state(
+        self,
+        lidar_scan: np.ndarray,
+        stopping_distance: float | None = None,
+    ) -> np.ndarray:
+        """Return explicit stopping-distance, forward-clearance, margin and TTC features."""
+        speed = float(np.linalg.norm(self.velocity))
+        if stopping_distance is None:
+            stopping_distance = speed * speed / (2.0 * self.config.max_deceleration)
+
+        if speed > 1e-6:
+            velocity_direction = self.velocity / speed
+            forward_index = int(np.argmax(ACTION_DIRECTIONS[:-1] @ velocity_direction))
+            forward_distance = float(lidar_scan[forward_index] * self.config.lidar_range)
+            time_to_collision = forward_distance / speed
+        else:
+            forward_distance = self.config.lidar_range
+            time_to_collision = 10.0
+
+        stopping_distance_ratio = float(
+            np.clip(stopping_distance / max(self.config.lidar_range, 1e-6), 0.0, 4.0) / 4.0
+        )
+        forward_distance_ratio = float(
+            np.clip(forward_distance / max(self.config.lidar_range, 1e-6), 0.0, 1.0)
+        )
+        forward_braking_margin = float(
+            np.clip(
+                (forward_distance - stopping_distance) / max(self.config.lidar_range, 1e-6),
+                -1.0,
+                1.0,
+            )
+        )
+        time_to_collision_ratio = float(np.clip(time_to_collision / 10.0, 0.0, 1.0))
+        return np.asarray(
+            [
+                stopping_distance_ratio,
+                forward_distance_ratio,
+                forward_braking_margin,
+                time_to_collision_ratio,
+            ],
+            dtype=np.float32,
+        )
+
+    def safe_action_mask(
+        self,
+        safety_buffer: float = 0.5,
+        worsening_tolerance: float = 0.25,
+    ) -> np.ndarray:
+        """Return actions that avoid immediate collision and do not worsen braking risk.
+
+        When the vehicle already has insufficient stopping distance, actions are kept only
+        if they maintain or improve the predicted braking margin. At least one action is
+        always returned so action selection remains well-defined in an unavoidable state.
+        """
+        current_speed = float(np.linalg.norm(self.velocity))
+        current_stopping_distance = current_speed * current_speed / (
+            2.0 * self.config.max_deceleration
+        )
+        lidar_scan = self._last_lidar_scan
+        if lidar_scan.shape != (self.lidar_dim,):
+            lidar_scan = self._lidar_scan()
+        if current_speed > 1e-6:
+            current_direction = self.velocity / current_speed
+            current_forward_index = int(np.argmax(ACTION_DIRECTIONS[:-1] @ current_direction))
+            current_forward_clearance = float(
+                lidar_scan[current_forward_index] * self.config.lidar_range
+            )
+        else:
+            current_forward_clearance = self.config.lidar_range
+        current_margin = current_forward_clearance - current_stopping_distance
+        mask = np.zeros(self.num_actions, dtype=bool)
+        predicted_margins = np.full(self.num_actions, -float("inf"), dtype=np.float64)
+        non_collision = np.zeros(self.num_actions, dtype=bool)
+
+        for action in range(self.num_actions):
+            _, next_velocity, effective_acceleration, candidate, _ = self._predict_action_dynamics(action)
+            collides = self._dynamics_segment_in_collision(
+                self.position,
+                self.velocity,
+                effective_acceleration,
+                self.config.trajectory_dt,
+            )
+            if collides:
+                continue
+
+            non_collision[action] = True
+            next_speed = float(np.linalg.norm(next_velocity))
+            next_stopping_distance = next_speed * next_speed / (2.0 * self.config.max_deceleration)
+            if next_speed > 1e-6:
+                next_direction = next_velocity / next_speed
+                forward_index = int(np.argmax(ACTION_DIRECTIONS[:-1] @ next_direction))
+                forward_clearance = float(lidar_scan[forward_index] * self.config.lidar_range)
+                travelled = max(
+                    0.0,
+                    float(np.dot(candidate - self.position, ACTION_DIRECTIONS[forward_index])),
+                )
+                forward_clearance = max(0.0, forward_clearance - travelled)
+            else:
+                forward_clearance = self.config.lidar_range
+            predicted_margin = forward_clearance - next_stopping_distance
+            predicted_margins[action] = predicted_margin
+            mask[action] = bool(
+                predicted_margin >= safety_buffer
+                or predicted_margin >= current_margin - worsening_tolerance
+            )
+
+        if not np.any(mask):
+            candidates = np.flatnonzero(non_collision)
+            if len(candidates):
+                best_action = int(candidates[np.argmax(predicted_margins[candidates])])
+            else:
+                best_action = COAST_ACTION_INDEX
+            mask[best_action] = True
+        return mask
 
     def _lidar_scan(self) -> np.ndarray:
         readings: list[float] = []
         for direction in ACTION_DIRECTIONS[:-1]:
             distance = self.config.lidar_range
             sample_count = max(2, int(math.ceil(distance / self.config.lidar_resolution)))
-            for i in range(1, sample_count + 1):
-                probe_distance = min(distance, i * self.config.lidar_resolution)
-                if self._point_in_collision(self.position + direction * probe_distance):
-                    distance = probe_distance
-                    break
+            probe_distances = np.minimum(
+                distance,
+                np.arange(1, sample_count + 1, dtype=np.float32)
+                * self.config.lidar_resolution,
+            )
+            probes = self.position[None, :] + probe_distances[:, None] * direction[None, :]
+            collisions = self._points_in_collision(probes)
+            collision_indices = np.flatnonzero(collisions)
+            if len(collision_indices):
+                distance = float(probe_distances[int(collision_indices[0])])
             readings.append(distance / self.config.lidar_range)
         return np.asarray(readings, dtype=np.float32)
 
-    def _sample_goal_far_from(self, start: np.ndarray) -> np.ndarray:
+    def _sample_goal_far_from(
+        self,
+        start: np.ndarray,
+        max_start_distance: float | None = None,
+        altitude_min: float | None = None,
+        altitude_max: float | None = None,
+    ) -> np.ndarray:
         for _ in range(10_000):
-            point = self._sample_free_point()
-            if np.linalg.norm(point - start) >= self.config.min_start_goal_distance:
+            point = self._sample_free_point(altitude_min, altitude_max)
+            distance = float(np.linalg.norm(point - start))
+            if distance < self.config.min_start_goal_distance:
+                continue
+            if max_start_distance is None or distance <= max_start_distance:
                 return point
         raise RuntimeError("Could not sample a valid goal far from start.")
 
@@ -493,20 +703,39 @@ class UAVPathPlanningEnv:
         start: np.ndarray,
         min_clearance: float,
         max_clearance: float,
+        max_start_distance: float | None = None,
+        altitude_min: float | None = None,
+        altitude_max: float | None = None,
+        horizontal_only: bool = False,
     ) -> np.ndarray | None:
         """Sample a free goal in a requested shell around any building."""
         for _ in range(10_000):
-            point = self._sample_free_point()
-            if np.linalg.norm(point - start) < self.config.min_start_goal_distance:
+            point = self._sample_free_point(altitude_min, altitude_max)
+            distance = float(np.linalg.norm(point - start))
+            if distance < self.config.min_start_goal_distance:
                 continue
-            clearance = self._nearest_obstacle_clearance(point)
+            if max_start_distance is not None and distance > max_start_distance:
+                continue
+            clearance = (
+                self._nearest_obstacle_horizontal_clearance(point)
+                if horizontal_only
+                else self._nearest_obstacle_clearance(point)
+            )
             if min_clearance <= clearance <= max_clearance:
                 return point
         return None
 
-    def _sample_free_point(self) -> np.ndarray:
+    def _sample_free_point(
+        self,
+        altitude_min: float | None = None,
+        altitude_max: float | None = None,
+    ) -> np.ndarray:
         low = self.map_min + self.config.uav_radius
         high = self.map_max - self.config.uav_radius
+        if altitude_min is not None:
+            low[2] = max(low[2], float(altitude_min))
+        if altitude_max is not None:
+            high[2] = min(high[2], float(altitude_max))
         for _ in range(10_000):
             point = self.rng.uniform(low, high).astype(np.float32)
             if not self._point_in_collision(point):
@@ -524,7 +753,9 @@ class UAVPathPlanningEnv:
     def _segment_in_collision(self, start: np.ndarray, end: np.ndarray) -> bool:
         length = float(np.linalg.norm(end - start))
         count = max(2, int(math.ceil(length / self.config.collision_resolution)) + 1)
-        return any(self._point_in_collision(start + t * (end - start)) for t in np.linspace(0.0, 1.0, count))
+        values = np.linspace(0.0, 1.0, count, dtype=np.float32)
+        points = start[None, :] + values[:, None] * (end - start)[None, :]
+        return bool(np.any(self._points_in_collision(points)))
 
     def _dynamics_segment_in_collision(
         self,
@@ -537,33 +768,64 @@ class UAVPathPlanningEnv:
         end_speed = float(np.linalg.norm(initial_velocity + acceleration * duration))
         estimated_length = max(float(np.linalg.norm(initial_velocity)), end_speed) * duration
         count = max(2, int(math.ceil(estimated_length / self.config.collision_resolution)) + 1)
-        for t in np.linspace(0.0, duration, count):
-            point = start + initial_velocity * t + 0.5 * acceleration * t * t
-            if self._point_in_collision(point):
-                return True
-        return False
+        values = np.linspace(0.0, duration, count, dtype=np.float32)
+        points = (
+            start[None, :]
+            + values[:, None] * initial_velocity[None, :]
+            + 0.5 * values[:, None] * values[:, None] * acceleration[None, :]
+        )
+        return bool(np.any(self._points_in_collision(points)))
 
     def _point_in_collision(self, point: np.ndarray) -> bool:
+        return bool(self._points_in_collision(np.asarray(point, dtype=np.float32)[None, :])[0])
+
+    def _points_in_collision(self, points: np.ndarray) -> np.ndarray:
+        """Vectorized boundary and axis-aligned obstacle checks for one or more points."""
+        values = np.asarray(points, dtype=np.float32).reshape(-1, 3)
         radius = self.config.uav_radius
-        if np.any(point < self.map_min + radius) or np.any(point > self.map_max - radius):
-            return True
-        return any(obstacle.contains(point, margin=radius) for obstacle in self.config.obstacles)
+        collisions = np.any(values < self.map_min + radius, axis=1) | np.any(
+            values > self.map_max - radius,
+            axis=1,
+        )
+        if len(self._obstacle_mins):
+            inside_obstacle = np.all(
+                values[:, None, :] >= self._obstacle_mins[None, :, :] - radius,
+                axis=2,
+            ) & np.all(
+                values[:, None, :] <= self._obstacle_maxs[None, :, :] + radius,
+                axis=2,
+            )
+            collisions |= np.any(inside_obstacle, axis=1)
+        return collisions
 
     def _nearest_clearance(self, point: np.ndarray) -> float:
         boundary_clearance = float(min(np.min(point - self.map_min), np.min(self.map_max - point)))
-        obstacle_clearance = min(
-            (obstacle.distance_to(point) for obstacle in self.config.obstacles),
-            default=float("inf"),
-        )
+        obstacle_clearance = self._nearest_obstacle_distance(point)
         return max(0.0, min(boundary_clearance, obstacle_clearance) - self.config.uav_radius)
 
     def _nearest_obstacle_clearance(self, point: np.ndarray) -> float:
         """Return UAV-surface clearance to the nearest building, excluding map boundaries."""
-        obstacle_distance = min(
-            (obstacle.distance_to(point) for obstacle in self.config.obstacles),
-            default=float("inf"),
-        )
+        obstacle_distance = self._nearest_obstacle_distance(point)
         return max(0.0, obstacle_distance - self.config.uav_radius)
+
+    def _nearest_obstacle_horizontal_clearance(self, point: np.ndarray) -> float:
+        """Return XY clearance so building-side targets exclude rooftop-only proximity."""
+        if not len(self._obstacle_mins):
+            return float("inf")
+        value = np.asarray(point, dtype=np.float32)[:2]
+        below = np.maximum(self._obstacle_mins[:, :2] - value[None, :], 0.0)
+        above = np.maximum(value[None, :] - self._obstacle_maxs[:, :2], 0.0)
+        distance = float(np.min(np.linalg.norm(below + above, axis=1)))
+        return max(0.0, distance - self.config.uav_radius)
+
+    def _nearest_obstacle_distance(self, point: np.ndarray) -> float:
+        if not len(self._obstacle_mins):
+            return float("inf")
+        value = np.asarray(point, dtype=np.float32)
+        below = np.maximum(self._obstacle_mins - value[None, :], 0.0)
+        above = np.maximum(value[None, :] - self._obstacle_maxs, 0.0)
+        deltas = below + above
+        return float(np.min(np.linalg.norm(deltas, axis=1)))
 
     def _info(
         self,

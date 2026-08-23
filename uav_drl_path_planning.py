@@ -28,7 +28,7 @@ import numpy as np
 import torch
 
 from uav_drl.actions import ACTION_NAMES
-from uav_drl.agent import DQNAgent
+from uav_drl.agent import DQNAgent, device_description
 from uav_drl.config import DEFAULT_SEED, UAVEnvConfig, config_to_dict
 from uav_drl.environment import UAVPathPlanningEnv
 from uav_drl.qgc_plan import (
@@ -133,18 +133,66 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--buffer-size", type=int, default=80_000)
     parser.add_argument("--target-update-interval", type=int, default=300)
-    parser.add_argument("--epsilon-start", type=float, default=1.0)
-    parser.add_argument("--epsilon-end", type=float, default=0.05)
-    parser.add_argument("--epsilon-decay", type=float, default=350.0)
+    parser.add_argument("--epsilon-start", type=float, default=0.30)
+    parser.add_argument("--epsilon-end", type=float, default=0.01)
+    parser.add_argument("--epsilon-decay", type=float, default=500.0)
+    parser.add_argument(
+        "--train-near-obstacle-probability",
+        type=float,
+        default=None,
+        help="final fraction of training goals near buildings; default depends on scene",
+    )
+    parser.add_argument("--train-near-obstacle-min-clearance", type=float)
+    parser.add_argument("--train-near-obstacle-max-clearance", type=float)
+    parser.add_argument("--train-near-obstacle-start-probability", type=float)
+    parser.add_argument("--train-near-obstacle-start-min-clearance", type=float)
+    parser.add_argument("--train-near-obstacle-start-max-clearance", type=float)
+    parser.add_argument("--train-near-obstacle-curriculum-episodes", type=int)
+    parser.add_argument("--train-goal-start-max-distance", type=float)
+    parser.add_argument("--train-goal-final-max-distance", type=float)
+    parser.add_argument("--train-goal-start-min-altitude", type=float)
+    parser.add_argument("--train-goal-start-max-altitude", type=float)
+    parser.add_argument("--train-goal-final-min-altitude", type=float)
+    parser.add_argument("--train-goal-final-max-altitude", type=float)
+    parser.add_argument(
+        "--train-goal-side-clearance-only",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="sample building-near goals by horizontal side clearance, excluding rooftop-only goals",
+    )
+    parser.add_argument(
+        "--disable-safe-action-mask",
+        action="store_true",
+        help="disable collision/braking-aware action masking",
+    )
+    parser.add_argument(
+        "--validation-interval",
+        type=int,
+        default=1_000,
+        help="run fixed epsilon=0 validation every N completed training episodes; 0 disables",
+    )
+    parser.add_argument("--validation-episodes", type=int, default=10)
+    parser.add_argument("--checkpoint-interval", type=int, default=100)
+    parser.add_argument("--migration-epsilon-start", type=float, default=0.05)
+    parser.add_argument(
+        "--keep-legacy-replay",
+        action="store_true",
+        help="keep old replay when appending state features (not recommended)",
+    )
 
     parser.add_argument("--output-root", type=Path, default=Path("outputs"))
     parser.add_argument("--output-dir", type=Path, help="override this scene's run-results directory")
     parser.add_argument("--save-model", type=Path, help="override this scene's checkpoint path")
+    parser.add_argument("--save-best-model", type=Path, help="override pure-policy best checkpoint path")
     parser.add_argument("--load-model", type=Path)
     parser.add_argument("--fresh-start", action="store_true", help="do not auto-load the previous checkpoint")
     parser.add_argument("--no-plots", action="store_true")
     parser.add_argument("--visualize", action="store_true")
-    parser.add_argument("--device", default=None, help="cpu, cuda, or auto when omitted")
+    parser.add_argument(
+        "--device",
+        default="cpu",
+        help="compute device: cpu (default), auto, cuda, or cuda:<index>",
+    )
 
     qgc = parser.add_argument_group("QGroundControl Plan export")
     qgc.add_argument(
@@ -177,6 +225,40 @@ def parse_args() -> argparse.Namespace:
         parser.error("--eval-near-obstacle-min-clearance must be non-negative")
     if args.eval_near_obstacle_max_clearance < args.eval_near_obstacle_min_clearance:
         parser.error("--eval-near-obstacle-max-clearance must not be below the minimum")
+    if args.train_near_obstacle_probability is not None and not 0.0 <= args.train_near_obstacle_probability <= 1.0:
+        parser.error("--train-near-obstacle-probability must be in [0, 1]")
+    if args.train_near_obstacle_min_clearance is not None and args.train_near_obstacle_min_clearance < 0.0:
+        parser.error("--train-near-obstacle-min-clearance must be non-negative")
+    if (
+        args.train_near_obstacle_max_clearance is not None
+        and args.train_near_obstacle_min_clearance is not None
+        and args.train_near_obstacle_max_clearance < args.train_near_obstacle_min_clearance
+    ):
+        parser.error("--train-near-obstacle-max-clearance must not be below the minimum")
+    if args.train_near_obstacle_start_probability is not None and not 0.0 <= args.train_near_obstacle_start_probability <= 1.0:
+        parser.error("--train-near-obstacle-start-probability must be in [0, 1]")
+    if args.train_near_obstacle_start_min_clearance is not None and args.train_near_obstacle_start_min_clearance < 0.0:
+        parser.error("--train-near-obstacle-start-min-clearance must be non-negative")
+    if (
+        args.train_near_obstacle_start_max_clearance is not None
+        and args.train_near_obstacle_start_min_clearance is not None
+        and args.train_near_obstacle_start_max_clearance < args.train_near_obstacle_start_min_clearance
+    ):
+        parser.error("--train-near-obstacle-start-max-clearance must not be below the minimum")
+    if args.train_near_obstacle_curriculum_episodes is not None and args.train_near_obstacle_curriculum_episodes < 0:
+        parser.error("--train-near-obstacle-curriculum-episodes must be non-negative")
+    if args.validation_interval < 0:
+        parser.error("--validation-interval must be non-negative")
+    if args.validation_episodes < 0:
+        parser.error("--validation-episodes must be non-negative")
+    if args.checkpoint_interval < 0:
+        parser.error("--checkpoint-interval must be non-negative")
+    if not 0.0 <= args.migration_epsilon_start <= 1.0:
+        parser.error("--migration-epsilon-start must be in [0, 1]")
+    if not 0.0 <= args.epsilon_end <= args.epsilon_start <= 1.0:
+        parser.error("epsilon values must satisfy 0 <= epsilon-end <= epsilon-start <= 1")
+    if args.epsilon_decay <= 0.0:
+        parser.error("--epsilon-decay must be positive")
     if args.qgc_autoload_dir is not None and not args.export_qgc_plan:
         parser.error("--qgc-autoload-dir requires --export-qgc-plan")
     if args.export_qgc_plan:
@@ -292,9 +374,16 @@ def restore_rng_state(state: dict[str, object] | None) -> None:
     if "numpy" in state:
         np.random.set_state(state["numpy"])
     if "torch" in state:
-        torch.set_rng_state(state["torch"])
+        torch_state = state["torch"]
+        if isinstance(torch_state, torch.Tensor):
+            torch_state = torch_state.cpu()
+        torch.set_rng_state(torch_state)
     if torch.cuda.is_available() and "torch_cuda" in state:
-        torch.cuda.set_rng_state_all(state["torch_cuda"])
+        cuda_states = [
+            value.cpu() if isinstance(value, torch.Tensor) else value
+            for value in state["torch_cuda"]
+        ]
+        torch.cuda.set_rng_state_all(cuda_states)
 
 
 def _mission_polyline_is_collision_free(env: UAVPathPlanningEnv, points: np.ndarray) -> bool:
@@ -373,6 +462,132 @@ def export_qgc_outputs(
     return output_paths
 
 
+def apply_scene_training_defaults(
+    args: argparse.Namespace,
+    scene_key: str,
+    config: UAVEnvConfig,
+) -> None:
+    """Use a gentler distance/altitude curriculum for fragmented residential maps."""
+    residential = scene_key != "wujing_airfield"
+    defaults = {
+        "train_near_obstacle_probability": 0.50 if residential else 0.70,
+        "train_near_obstacle_min_clearance": 5.0 if residential else 2.0,
+        "train_near_obstacle_max_clearance": 15.0 if residential else 12.0,
+        "train_near_obstacle_start_probability": 0.10 if residential else 0.30,
+        "train_near_obstacle_start_min_clearance": 15.0,
+        "train_near_obstacle_start_max_clearance": 30.0,
+        "train_near_obstacle_curriculum_episodes": 2_000 if residential else 1_500,
+    }
+    for name, value in defaults.items():
+        if getattr(args, name) is None:
+            setattr(args, name, value)
+
+    if not residential:
+        if args.train_goal_side_clearance_only is None:
+            args.train_goal_side_clearance_only = False
+        return
+
+    maximum_distance = float(
+        np.linalg.norm([config.map_width, config.map_height, config.map_altitude])
+    )
+    start_max_distance = {
+        "lanxianghu_villa": 250.0,
+        "sanming_garden": 200.0,
+        "spring_garden_phase2": 200.0,
+    }[scene_key]
+    altitude_limits = {
+        "lanxianghu_villa": (5.0, 15.0, 5.0, 25.0),
+        "sanming_garden": (5.0, 15.0, 5.0, 25.0),
+        "spring_garden_phase2": (5.0, 20.0, 5.0, 40.0),
+    }[scene_key]
+    curriculum_defaults = {
+        "train_goal_start_max_distance": start_max_distance,
+        "train_goal_final_max_distance": maximum_distance,
+        "train_goal_start_min_altitude": altitude_limits[0],
+        "train_goal_start_max_altitude": altitude_limits[1],
+        "train_goal_final_min_altitude": altitude_limits[2],
+        "train_goal_final_max_altitude": altitude_limits[3],
+    }
+    for name, value in curriculum_defaults.items():
+        if getattr(args, name) is None:
+            setattr(args, name, value)
+    if args.train_goal_side_clearance_only is None:
+        args.train_goal_side_clearance_only = True
+
+
+def validate_scene_training_curriculum(
+    args: argparse.Namespace,
+    config: UAVEnvConfig,
+) -> None:
+    """Fail early when a CLI override would make residential goal sampling impossible."""
+    probability_fields = (
+        "train_near_obstacle_start_probability",
+        "train_near_obstacle_probability",
+    )
+    for name in probability_fields:
+        value = float(getattr(args, name))
+        if not 0.0 <= value <= 1.0:
+            raise ValueError(f"--{name.replace('_', '-')} must be in [0, 1].")
+
+    for prefix in ("train_near_obstacle_start", "train_near_obstacle"):
+        minimum = float(getattr(args, f"{prefix}_min_clearance"))
+        maximum = float(getattr(args, f"{prefix}_max_clearance"))
+        if minimum < 0.0 or maximum < minimum:
+            raise ValueError(f"Invalid {prefix.replace('_', '-')} clearance range.")
+
+    if int(args.train_near_obstacle_curriculum_episodes) < 0:
+        raise ValueError("--train-near-obstacle-curriculum-episodes must be non-negative.")
+
+    for value in (
+        args.train_goal_start_max_distance,
+        args.train_goal_final_max_distance,
+    ):
+        if value is not None and (
+            not np.isfinite(value) or value < config.min_start_goal_distance
+        ):
+            raise ValueError(
+                "Training goal maximum distance must be finite and no smaller than "
+                "min_start_goal_distance."
+            )
+
+    flyable_min = config.uav_radius
+    flyable_max = config.map_altitude - config.uav_radius
+    for stage in ("start", "final"):
+        minimum = getattr(args, f"train_goal_{stage}_min_altitude")
+        maximum = getattr(args, f"train_goal_{stage}_max_altitude")
+        if minimum is None and maximum is None:
+            continue
+        if minimum is None or maximum is None:
+            raise ValueError(
+                f"Both --train-goal-{stage}-min-altitude and the matching maximum "
+                "must be provided together."
+            )
+        if not all(np.isfinite([minimum, maximum])):
+            raise ValueError("Training goal altitude bounds must be finite.")
+        if minimum < flyable_min or maximum > flyable_max or maximum < minimum:
+            raise ValueError(
+                f"Training goal {stage} altitude must stay in the flyable range "
+                f"[{flyable_min}, {flyable_max}] m."
+            )
+
+
+def pure_policy_validation_key(metrics: dict[str, object]) -> tuple[float, float, float, float]:
+    """Rank checkpoints by rates so validation sets of different sizes remain comparable."""
+    episodes = max(1, int(metrics.get("episodes", 1)))
+    success_rate = float(
+        metrics.get("success_rate", int(metrics.get("successes", 0)) / episodes)
+    )
+    collision_rate = float(
+        metrics.get("collision_rate", int(metrics.get("collisions", 0)) / episodes)
+    )
+    return (
+        success_rate,
+        -collision_rate,
+        -float(metrics.get("avg_success_steps", float("inf"))),
+        float(metrics.get("avg_reward", -float("inf"))),
+    )
+
+
 def main() -> None:
     """组织完整三维训练和评估流程。"""
     args = parse_args()
@@ -389,10 +604,15 @@ def main() -> None:
     scene_output_root = args.output_root / scene.key
     output_dir: Path = args.output_dir or scene_output_root / "runs"
     save_model: Path = args.save_model or scene_output_root / "models" / f"{scene.key}_dqn.pt"
+    save_best_model: Path = args.save_best_model or save_model.with_name(
+        f"{save_model.stem}_best{save_model.suffix}"
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     run_output_dir = make_run_output_dir(output_dir)
 
     config = make_config(args)
+    apply_scene_training_defaults(args, scene.key, config)
+    validate_scene_training_curriculum(args, config)
     default_z = min(max(args.default_altitude, 1.0), config.map_altitude - 1.0)
     start = optional_point_3d(args.start_x, args.start_y, args.start_z, "start", default_z)
     if start is None:
@@ -403,6 +623,33 @@ def main() -> None:
         "scene_key": scene.key,
         "scene_display_name": scene.display_name,
         "checkpoint_path": str(save_model),
+        "training_goal_sampling": {
+            "start_probability": args.train_near_obstacle_start_probability,
+            "final_probability": args.train_near_obstacle_probability,
+            "start_min_clearance_m": args.train_near_obstacle_start_min_clearance,
+            "start_max_clearance_m": args.train_near_obstacle_start_max_clearance,
+            "final_min_clearance_m": args.train_near_obstacle_min_clearance,
+            "final_max_clearance_m": args.train_near_obstacle_max_clearance,
+            "curriculum_episodes": args.train_near_obstacle_curriculum_episodes,
+            "start_max_distance_m": args.train_goal_start_max_distance,
+            "final_max_distance_m": args.train_goal_final_max_distance,
+            "start_altitude_m": [
+                args.train_goal_start_min_altitude,
+                args.train_goal_start_max_altitude,
+            ],
+            "final_altitude_m": [
+                args.train_goal_final_min_altitude,
+                args.train_goal_final_max_altitude,
+            ],
+            "side_clearance_only": args.train_goal_side_clearance_only,
+        },
+        "safe_action_mask": not args.disable_safe_action_mask,
+        "pure_policy_validation": {
+            "interval": args.validation_interval,
+            "episodes": args.validation_episodes,
+            "best_checkpoint_path": str(save_best_model),
+            "latest_checkpoint_interval": args.checkpoint_interval,
+        },
         "evaluation_goal_sampling": {
             "near_obstacle_probability": args.eval_near_obstacle_probability,
             "min_clearance_m": args.eval_near_obstacle_min_clearance,
@@ -443,7 +690,10 @@ def main() -> None:
         device=args.device,
     )
 
-    print(f"state_dim={env.state_dim}, action_dim={env.num_actions}, device={agent.device}")
+    print(
+        f"state_dim={env.state_dim}, action_dim={env.num_actions}, "
+        f"device={device_description(agent.device)}"
+    )
     print(f"actions={dict(enumerate(ACTION_NAMES))}")
     print(
         f"scene={env.config.scene_name}, "
@@ -476,14 +726,43 @@ def main() -> None:
         f"vertical_guidance={config.vertical_speed_guidance_scale}, "
         f"guidance_distance={config.goal_guidance_distance}m"
     )
+    print(
+        "training="
+        f"epsilon({args.epsilon_start}->{args.epsilon_end}, decay={args.epsilon_decay}), "
+        f"near_obstacle_curriculum="
+        f"{args.train_near_obstacle_start_probability:.0%}->"
+        f"{args.train_near_obstacle_probability:.0%}/"
+        f"{args.train_near_obstacle_curriculum_episodes}ep, "
+        f"clearance={args.train_near_obstacle_start_min_clearance}-"
+        f"{args.train_near_obstacle_start_max_clearance}m -> "
+        f"{args.train_near_obstacle_min_clearance}-"
+        f"{args.train_near_obstacle_max_clearance}m, "
+        f"safe_action_mask={not args.disable_safe_action_mask}"
+    )
 
     resume_model = args.load_model
     if resume_model is None and not args.fresh_start and save_model.exists():
         resume_model = save_model
 
     trained_episodes = 0
+    curriculum_trained_episodes = 0
+    exploration_trained_episodes = 0
+    effective_epsilon_start = args.epsilon_start
     if resume_model:
-        checkpoint = agent.load(resume_model)
+        discard_residential_legacy_replay = (
+            scene.key != "wujing_airfield" and not args.keep_legacy_replay
+        )
+        checkpoint = agent.load(
+            resume_model,
+            discard_replay_on_state_migration=discard_residential_legacy_replay,
+        )
+        if (
+            discard_residential_legacy_replay
+            and int(checkpoint.get("replay_transition_version", 0)) < 2
+            and len(agent.replay_buffer) > 0
+        ):
+            agent.replay_buffer.clear()
+            checkpoint["replay_buffer_discarded"] = True
         checkpoint_scene_key = checkpoint.get("scene_key")
         checkpoint_config = checkpoint.get("config")
         checkpoint_scene_name = (
@@ -511,38 +790,231 @@ def main() -> None:
                 f"version {config.reward_shaping_version}. Start a new model with --fresh-start."
             )
         trained_episodes = int(checkpoint.get("trained_episodes", 0))
+        curriculum_trained_episodes = int(
+            checkpoint.get("curriculum_trained_episodes", 0)
+        )
+        exploration_trained_episodes = int(
+            checkpoint.get("exploration_trained_episodes", trained_episodes)
+        )
+        effective_epsilon_start = float(
+            checkpoint.get("effective_epsilon_start", args.epsilon_start)
+        )
+        if checkpoint.get("replay_buffer_discarded"):
+            exploration_trained_episodes = 0
+            effective_epsilon_start = min(
+                args.epsilon_start,
+                args.migration_epsilon_start,
+            )
         restore_rng_state(checkpoint.get("rng_state"))
         print(f"Loaded model from {resume_model}")
+        if checkpoint.get("state_dim_migrated_from") is not None:
+            print(
+                "Migrated checkpoint state: "
+                f"{checkpoint['state_dim_migrated_from']} -> {env.state_dim}; "
+                "new braking-feature weights and replay columns were initialized to zero."
+            )
+        if checkpoint.get("replay_buffer_discarded"):
+            print(
+                "Discarded legacy replay transitions because they do not contain "
+                "the new braking state/action masks; network weights were retained."
+            )
         print(f"Resuming from episode {trained_episodes}, replay_buffer={len(agent.replay_buffer)}")
+        print(f"Building-goal curriculum resumes from episode {curriculum_trained_episodes}")
+        print(
+            "Exploration adaptation resumes from episode "
+            f"{exploration_trained_episodes} with epsilon_start={effective_epsilon_start}"
+        )
     print(f"Run outputs will be saved to {run_output_dir}")
+
+    resume_trained_episodes = trained_episodes
+    resume_curriculum_episodes = curriculum_trained_episodes
+    resume_exploration_episodes = exploration_trained_episodes
+
+    def curriculum_progress_at(completed_episodes: int) -> int:
+        newly_completed = max(0, completed_episodes - resume_trained_episodes)
+        return resume_curriculum_episodes + newly_completed
+
+    def exploration_progress_at(completed_episodes: int) -> int:
+        newly_completed = max(0, completed_episodes - resume_trained_episodes)
+        return resume_exploration_episodes + newly_completed
+
+    best_validation_metrics = (
+        checkpoint.get("best_validation_metrics")
+        if resume_model and isinstance(checkpoint.get("best_validation_metrics"), dict)
+        else None
+    )
+    if isinstance(best_validation_metrics, dict):
+        best_validation_key = pure_policy_validation_key(best_validation_metrics)
+    else:
+        best_validation_key = (-1.0, -1.0, -float("inf"), -float("inf"))
+
+    def checkpoint_extra_state(completed_episodes: int) -> dict[str, object]:
+        return {
+            "trained_episodes": completed_episodes,
+            "curriculum_trained_episodes": curriculum_progress_at(completed_episodes),
+            "exploration_trained_episodes": exploration_progress_at(completed_episodes),
+            "epsilon_start": effective_epsilon_start,
+            "effective_epsilon_start": effective_epsilon_start,
+            "configured_epsilon_start": args.epsilon_start,
+            "epsilon_end": args.epsilon_end,
+            "epsilon_decay": args.epsilon_decay,
+            "train_near_obstacle_probability": args.train_near_obstacle_probability,
+            "train_near_obstacle_min_clearance": args.train_near_obstacle_min_clearance,
+            "train_near_obstacle_max_clearance": args.train_near_obstacle_max_clearance,
+            "train_near_obstacle_start_probability": args.train_near_obstacle_start_probability,
+            "train_near_obstacle_start_min_clearance": args.train_near_obstacle_start_min_clearance,
+            "train_near_obstacle_start_max_clearance": args.train_near_obstacle_start_max_clearance,
+            "train_near_obstacle_curriculum_episodes": args.train_near_obstacle_curriculum_episodes,
+            "train_goal_start_max_distance": args.train_goal_start_max_distance,
+            "train_goal_final_max_distance": args.train_goal_final_max_distance,
+            "train_goal_start_min_altitude": args.train_goal_start_min_altitude,
+            "train_goal_start_max_altitude": args.train_goal_start_max_altitude,
+            "train_goal_final_min_altitude": args.train_goal_final_min_altitude,
+            "train_goal_final_max_altitude": args.train_goal_final_max_altitude,
+            "train_goal_side_clearance_only": args.train_goal_side_clearance_only,
+            "safe_action_mask": not args.disable_safe_action_mask,
+            "best_validation_metrics": best_validation_metrics,
+            "seed": args.seed,
+            "scene_key": scene.key,
+            "rng_state": capture_rng_state(),
+        }
+
+    validation_env = UAVPathPlanningEnv(config=config, seed=args.seed + 100_000)
+
+    def run_pure_policy_validation(completed_episodes: int, force: bool = False) -> None:
+        nonlocal best_validation_key, best_validation_metrics
+        if args.validation_interval == 0 or args.validation_episodes == 0:
+            return
+        if not force and completed_episodes % args.validation_interval != 0:
+            return
+
+        print(
+            f"Starting pure-policy validation at episode {completed_episodes} "
+            f"({args.validation_episodes} episodes, epsilon=0)..."
+        )
+        validation_results, _ = evaluate_agent(
+            env=validation_env,
+            agent=agent,
+            episodes=args.validation_episodes,
+            start=start,
+            goal=goal,
+            seed=args.seed + 200_000,
+            near_obstacle_goal_probability=args.eval_near_obstacle_probability,
+            near_obstacle_goal_min_clearance=args.eval_near_obstacle_min_clearance,
+            near_obstacle_goal_max_clearance=args.eval_near_obstacle_max_clearance,
+            use_safe_action_mask=not args.disable_safe_action_mask,
+            verbose=False,
+            show_progress=True,
+            progress_desc=f"validation@{completed_episodes}",
+        )
+        successes = sum(bool(item.get("success", False)) for item in validation_results)
+        collisions = sum(bool(item.get("collision", False)) for item in validation_results)
+        success_steps = [
+            int(item["steps"])
+            for item in validation_results
+            if bool(item.get("success", False))
+        ]
+        avg_success_steps = (
+            float(np.mean(success_steps)) if success_steps else float("inf")
+        )
+        avg_reward = float(
+            np.mean([float(item["total_reward"]) for item in validation_results])
+        )
+        validation_metrics = {
+            "episodes": args.validation_episodes,
+            "successes": successes,
+            "success_rate": successes / args.validation_episodes,
+            "collisions": collisions,
+            "collision_rate": collisions / args.validation_episodes,
+            "avg_success_steps": avg_success_steps,
+            "avg_reward": avg_reward,
+        }
+        validation_key = pure_policy_validation_key(validation_metrics)
+        print(
+            "pure-policy validation: "
+            f"episode={completed_episodes}, "
+            f"success={successes}/{args.validation_episodes} "
+            f"({successes / args.validation_episodes:.1%}), "
+            f"collisions={collisions}, "
+            f"avg_success_steps={avg_success_steps:.1f}, avg_reward={avg_reward:.2f}"
+        )
+        if validation_key > best_validation_key:
+            best_validation_key = validation_key
+            best_validation_metrics = {
+                "completed_episodes": completed_episodes,
+                "episodes": args.validation_episodes,
+                "successes": successes,
+                "success_rate": successes / args.validation_episodes,
+                "collisions": collisions,
+                "collision_rate": collisions / args.validation_episodes,
+                "avg_success_steps": avg_success_steps,
+                "avg_reward": avg_reward,
+                "epsilon": 0.0,
+                "near_obstacle_probability": args.eval_near_obstacle_probability,
+                "seed": args.seed + 200_000,
+            }
+            save_best_model.parent.mkdir(parents=True, exist_ok=True)
+            agent.save(
+                save_best_model,
+                config=config,
+                extra_state=checkpoint_extra_state(completed_episodes),
+            )
+            print(f"Saved new pure-policy best model to {save_best_model}")
+
+    def training_episode_end(completed_episodes: int) -> None:
+        run_pure_policy_validation(completed_episodes)
+        if args.checkpoint_interval and completed_episodes % args.checkpoint_interval == 0:
+            save_model.parent.mkdir(parents=True, exist_ok=True)
+            agent.save(
+                save_model,
+                config=config,
+                extra_state=checkpoint_extra_state(completed_episodes),
+            )
+            print(f"Saved periodic latest checkpoint to {save_model}")
 
     history = TrainHistory()
     if not args.skip_train and args.episodes > 0:
+        if resume_model:
+            run_pure_policy_validation(trained_episodes, force=True)
         history = train_dqn(
             env=env,
             agent=agent,
             episodes=args.episodes,
             target_update_interval=args.target_update_interval,
-            epsilon_start=args.epsilon_start,
+            epsilon_start=effective_epsilon_start,
             epsilon_end=args.epsilon_end,
             epsilon_decay=args.epsilon_decay,
             start=start,
             goal=goal,
+            near_obstacle_goal_probability=args.train_near_obstacle_probability,
+            near_obstacle_goal_min_clearance=args.train_near_obstacle_min_clearance,
+            near_obstacle_goal_max_clearance=args.train_near_obstacle_max_clearance,
+            near_obstacle_goal_start_probability=args.train_near_obstacle_start_probability,
+            near_obstacle_goal_start_min_clearance=args.train_near_obstacle_start_min_clearance,
+            near_obstacle_goal_start_max_clearance=args.train_near_obstacle_start_max_clearance,
+            near_obstacle_goal_curriculum_episodes=args.train_near_obstacle_curriculum_episodes,
+            goal_max_distance_start=args.train_goal_start_max_distance,
+            goal_max_distance_final=args.train_goal_final_max_distance,
+            goal_altitude_start_min=args.train_goal_start_min_altitude,
+            goal_altitude_start_max=args.train_goal_start_max_altitude,
+            goal_altitude_final_min=args.train_goal_final_min_altitude,
+            goal_altitude_final_max=args.train_goal_final_max_altitude,
+            goal_near_obstacle_horizontal_only=args.train_goal_side_clearance_only,
+            use_safe_action_mask=not args.disable_safe_action_mask,
             seed=args.seed,
             episode_offset=trained_episodes,
+            epsilon_episode_offset=exploration_trained_episodes,
+            curriculum_episode_offset=curriculum_trained_episodes,
+            episode_end_callback=training_episode_end,
         )
         trained_episodes += args.episodes
+        curriculum_trained_episodes += args.episodes
+        exploration_trained_episodes += args.episodes
+        if trained_episodes % max(1, args.validation_interval) != 0:
+            run_pure_policy_validation(trained_episodes, force=True)
         if save_model:
             save_model.parent.mkdir(parents=True, exist_ok=True)
-            checkpoint_state = {
-                "trained_episodes": trained_episodes,
-                "epsilon_start": args.epsilon_start,
-                "epsilon_end": args.epsilon_end,
-                "epsilon_decay": args.epsilon_decay,
-                "seed": args.seed,
-                "scene_key": scene.key,
-                "rng_state": capture_rng_state(),
-            }
+            checkpoint_state = checkpoint_extra_state(trained_episodes)
             agent.save(save_model, config=config, extra_state=checkpoint_state)
             print(f"Saved model to {save_model}")
             run_model_path = run_output_dir / save_model.name
@@ -562,6 +1034,7 @@ def main() -> None:
         near_obstacle_goal_probability=args.eval_near_obstacle_probability,
         near_obstacle_goal_min_clearance=args.eval_near_obstacle_min_clearance,
         near_obstacle_goal_max_clearance=args.eval_near_obstacle_max_clearance,
+        use_safe_action_mask=not args.disable_safe_action_mask,
     )
 
     if best_trajectory:

@@ -2,7 +2,7 @@
 
 本项目第二阶段使用 DQN 实现带点质量动力学的三维无人机轨迹规划。输入三维起点和目标点后，智能体会在建筑物、地图边界、水平/三维速度、升降速度、爬升角、加减速度、急动度和终点速度约束下学习飞向目标点。
 
-状态包含位置、目标相对量、速度、上一时刻实际加速度、速度/加速度占比、制动裕度、26 向雷达和时间进度。27 个离散动作表示 26 个方向的正常飞行加速度指令与一个零加速度滑行动作。环境使用固定时间步直接积分得到轨迹点，因此输出的速度和加速度是 RL 决策过程的一部分，而非事后轨迹平滑结果。
+状态包含位置、目标相对量、速度、上一时刻实际加速度、速度/加速度占比、制动裕度、26 向雷达、时间进度，以及停车距离、前向雷达、制动裕量和预计碰撞时间 4 个提前制动量。27 个离散动作表示 26 个方向的正常飞行加速度指令与一个零加速度滑行动作。环境使用固定时间步直接积分得到轨迹点，因此输出的速度和加速度是 RL 决策过程的一部分，而非事后轨迹平滑结果。
 
 ## 项目结构
 
@@ -36,8 +36,16 @@ B01-B08 的高度暂假设为 15 m，B09-B10 暂假设为 25 m。这些数值来
 
 ## 安装依赖
 
+当前 `requirements.txt` 使用 CUDA 12.6 版 PyTorch，适用于本机 NVIDIA RTX 4060：
+
 ```powershell
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+```
+
+训练默认使用 CPU。只有明确指定 `--device cuda` 或 `--device auto` 时才会使用 GPU：
+
+```powershell
+python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
 ## 快速测试
@@ -68,12 +76,31 @@ python .\uav_drl_path_planning.py --scene spring_garden_phase2 --episodes 1500 -
 默认外扩 2 m；吴泾试飞场仍使用 8 m 外扩量。可用 `--obstacle-inflation`
 覆盖当前场景的默认值。
 
-### 建筑附近目标评估
+### 安全动作、渐进目标与最佳模型
 
-训练阶段仍使用原来的均匀随机目标。训练完成后的随机评估默认有 70% 的目标
-采样在建筑外侧 2--12 m 的安全邻域，以覆盖楼旁接近、绕障和末端减速等现实
-情况；其余 30% 保持全地图均匀采样。评估日志会输出 `goal_sample`、
-`goal_building_clearance`，汇总中会输出实际建筑邻近目标比例。
+训练默认启用安全动作屏蔽：每次选动作前先预测下一步动力学，排除会立即碰撞的
+动作；进入制动风险区后，还会排除继续恶化前向制动裕量的动作。随机探索和 DQN
+目标动作选择均使用同一屏蔽，因此不会再把明显危险动作作为探索样本。需要做消融
+实验时可增加 `--disable-safe-action-mask`。
+
+建筑附近目标采用分场景渐进课程。吴泾仍从 30%、15--30 m 净空逐步过渡到
+70%、2--12 m；三个住宅区从更容易的 10%、15--30 m 开始，在 2000 回合内逐步
+过渡到 50%、5--15 m。住宅区前期还会限制目标距离和高度，并只按建筑侧面净空
+采样，随后逐步放宽到整张地图，减少远距离、高楼顶目标导致的低速超时。新 checkpoint
+会分别保存课程与探索进度。训练进度条中的 `near_goal` 表示最近 50 回合的实际建筑
+邻近目标比例，`curriculum` 表示当前设定概率，`safe` 表示当前可选动作比例，`speed`
+表示该回合平均飞行速度。
+
+每 1000 回合默认运行 10 回合固定随机种子的纯策略验证（`epsilon=0`），按成功率、
+碰撞率、成功回合平均步数、平均奖励依次比较并保存最佳模型。每 100 回合另存一次
+可续训的最新 checkpoint，避免长时间 CPU 训练意外中断后损失进度。常规 checkpoint 保存到
+`<scene>_dqn.pt`，最佳模型单独保存到 `<scene>_dqn_best.pt`，不会相互覆盖。可用
+`--validation-interval`、`--validation-episodes`、`--checkpoint-interval` 和
+`--save-best-model` 调整；将
+`--validation-interval` 设为 0 可关闭训练中验证。
+
+默认探索率由 0.30 衰减到 0.01，衰减尺度为 500 回合。可通过
+`--epsilon-start`、`--epsilon-end` 和 `--epsilon-decay` 覆盖。
 
 ```powershell
 # 所有随机评估目标均优先取在建筑附近
@@ -85,9 +112,30 @@ python .\uav_drl_path_planning.py --scene wujing_airfield --skip-train `
   --eval-episodes 50 --eval-near-obstacle-probability 0.0
 ```
 
-可通过 `--eval-near-obstacle-min-clearance` 和
+随机评估仍默认有 70% 的目标位于建筑外侧 2--12 m。可通过
+`--eval-near-obstacle-min-clearance` 和
 `--eval-near-obstacle-max-clearance` 修改建筑净空范围。明确指定
 `--target-x/--target-y` 时固定目标优先，不再进行随机目标采样。
+课程终点可通过 `--train-near-obstacle-probability`、
+`--train-near-obstacle-min-clearance`、`--train-near-obstacle-max-clearance`
+修改；课程起点和时长使用对应的 `--train-near-obstacle-start-*` 和
+`--train-near-obstacle-curriculum-episodes` 修改。
+
+### 在已有模型基础上继续训练
+
+不加 `--fresh-start` 时会自动加载当前场景的 `<scene>_dqn.pt`。原先 46 维、但同属
+当前 v2 奖励版本的模型会自动扩展为 50 维：旧网络权重原样保留，新增 4 个提前制动
+输入以零权重开始学习。住宅区旧经验没有可靠的安全动作屏蔽记录，因此默认清空旧经验池，
+用较低的 0.05 探索率做适应性续训；吴泾现有 50 维模型仍照常恢复经验池。可用
+`--keep-legacy-replay` 强制保留旧经验，但不建议这样做。奖励函数没有改变，默认仍在
+CPU 上运行，例如：
+
+```powershell
+python .\uav_drl_path_planning.py --scene lanxianghu_villa --episodes 1500 --eval-episodes 50
+```
+
+如果 checkpoint 来自 v1 奖励版本，其经验回放中的旧奖励无法自动重算，仍应使用
+`--fresh-start`；或者只迁移网络权重后丢弃旧回放池。
 
 默认动力学参数来自飞行日志：最大水平速度 23.0 m/s、最大三维合速度
 23.18 m/s、最大上升速度 2.85 m/s、最大下降速度 1.65 m/s、最大爬升角

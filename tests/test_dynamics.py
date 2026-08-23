@@ -82,6 +82,59 @@ class DynamicsEnvironmentTests(unittest.TestCase):
         self.assertLessEqual(env.goal_obstacle_clearance, 8.0)
         self.assertFalse(env._point_in_collision(env.goal))
 
+    def test_residential_curriculum_limits_distance_altitude_and_building_side(self) -> None:
+        obstacle = BoxObstacle(18.0, 8.0, 0.0, 22.0, 12.0, 15.0, "test_building")
+        env = UAVPathPlanningEnv(
+            make_config(obstacles=[obstacle], min_start_goal_distance=10.0)
+        )
+        start = np.asarray([5.0, 5.0, 5.0], dtype=np.float32)
+        env.reset(
+            start=start,
+            seed=321,
+            goal_near_obstacle_probability=1.0,
+            goal_near_obstacle_min_clearance=2.0,
+            goal_near_obstacle_max_clearance=8.0,
+            goal_max_start_distance=25.0,
+            goal_altitude_min=5.0,
+            goal_altitude_max=10.0,
+            goal_near_obstacle_horizontal_only=True,
+        )
+
+        horizontal_clearance = env._nearest_obstacle_horizontal_clearance(env.goal)
+        self.assertEqual(env.goal_sampling_mode, "near_obstacle")
+        self.assertLessEqual(float(np.linalg.norm(env.goal - start)), 25.0)
+        self.assertGreaterEqual(float(env.goal[2]), 5.0)
+        self.assertLessEqual(float(env.goal[2]), 10.0)
+        self.assertGreaterEqual(horizontal_clearance, 2.0)
+        self.assertLessEqual(horizontal_clearance, 8.0)
+
+    def test_vectorized_collision_check_matches_scalar_definition(self) -> None:
+        obstacle = BoxObstacle(18.0, 8.0, 0.0, 22.0, 12.0, 15.0, "test_building")
+        env = UAVPathPlanningEnv(make_config(obstacles=[obstacle], uav_radius=0.5))
+        points = np.asarray(
+            [
+                [10.0, 10.0, 10.0],
+                [18.0, 10.0, 5.0],
+                [22.4, 12.4, 15.4],
+                [22.6, 12.6, 15.6],
+                [0.4, 10.0, 10.0],
+                [39.5, 20.0, 20.0],
+            ],
+            dtype=np.float32,
+        )
+        expected = []
+        for point in points:
+            outside_flyable_bounds = bool(
+                np.any(point < env.map_min + env.config.uav_radius)
+                or np.any(point > env.map_max - env.config.uav_radius)
+            )
+            expected.append(
+                outside_flyable_bounds
+                or obstacle.contains(point, margin=env.config.uav_radius)
+            )
+
+        self.assertEqual(env._points_in_collision(points).tolist(), expected)
+
     def test_near_obstacle_goal_sampling_arguments_are_validated(self) -> None:
         env = UAVPathPlanningEnv(make_config())
         with self.assertRaises(ValueError):
@@ -141,10 +194,25 @@ class DynamicsEnvironmentTests(unittest.TestCase):
     def test_state_and_action_include_dynamics(self) -> None:
         env = UAVPathPlanningEnv(make_config())
         state = env.reset(start=(10, 10, 10), goal=(30, 10, 10))
-        self.assertEqual(env.state_dim, 46)
-        self.assertEqual(state.shape, (46,))
+        self.assertEqual(env.state_dim, 50)
+        self.assertEqual(state.shape, (50,))
+        self.assertTrue(np.all(np.isfinite(state[-4:])))
         self.assertIn("accelerate_east", ACTION_NAMES)
         self.assertEqual(ACTION_NAMES[-1], "coast")
+
+    def test_safe_action_mask_rejects_acceleration_toward_close_building(self) -> None:
+        obstacle = BoxObstacle(18.0, 8.0, 0.0, 22.0, 12.0, 15.0, "test_building")
+        env = UAVPathPlanningEnv(make_config(obstacles=[obstacle], max_speed=10.0))
+        env.reset(start=(14, 10, 5), goal=(30, 10, 5))
+        env.velocity = np.asarray([5.0, 0.0, 0.0], dtype=np.float32)
+        env.acceleration = np.zeros(3, dtype=np.float32)
+
+        mask = env.safe_action_mask()
+
+        self.assertEqual(mask.shape, (env.num_actions,))
+        self.assertTrue(np.any(mask))
+        self.assertFalse(mask[ACTION_NAMES.index("accelerate_east")])
+        self.assertTrue(mask[ACTION_NAMES.index("accelerate_west")])
 
     def test_velocity_is_integrated_and_capped(self) -> None:
         env = UAVPathPlanningEnv(make_config(goal_radius=0.01, goal_speed_tolerance=0.0))

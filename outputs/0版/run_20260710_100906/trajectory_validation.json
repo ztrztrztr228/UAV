@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "deviation_tolerance": 2.0,
+  "max_deviation": 0.16374013171764545,
+  "mean_deviation": 0.034328878911666194,
+  "max_deviation_index": 10,
+  "max_deviation_time": 10.0,
+  "collision_free": true,
+  "within_bounds": true,
+  "max_speed": 6.102168667475859,
+  "max_acceleration": 2.2719563382786228,
+  "sample_count": 13,
+  "total_time": 12.0,
+  "total_length": 56.2614188431019
+}

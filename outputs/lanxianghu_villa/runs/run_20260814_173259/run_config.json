@@ -1,0 +1,1092 @@
+{
+  "scene_key": "lanxianghu_villa",
+  "scene_display_name": "兰香湖贰号东区与西区",
+  "checkpoint_path": "outputs\\lanxianghu_villa\\models\\lanxianghu_villa_dqn.pt",
+  "config": {
+    "scene_name": "lanxianghu_villa_estimated",
+    "coordinate_system": "local_enu_from_gcj02_origin",
+    "origin_lon_gcj02": 121.4636,
+    "origin_lat_gcj02": 31.0172,
+    "obstacle_inflation": 2.0,
+    "map_x_min": 0.0,
+    "map_y_min": 0.0,
+    "map_width": 760.0,
+    "map_height": 620.0,
+    "map_altitude": 30.0,
+    "step_length": 2.0,
+    "max_steps": 320,
+    "trajectory_dt": 0.5,
+    "max_horizontal_speed": 23.0,
+    "max_speed": 23.18,
+    "max_climb_speed": 2.85,
+    "max_descent_speed": 1.65,
+    "max_climb_angle_deg": 90.0,
+    "max_acceleration": 15.5,
+    "normal_acceleration": 3.0,
+    "max_deceleration": 3.09,
+    "max_jerk": 78.0,
+    "raw_max_jerk": 142.0,
+    "goal_speed_tolerance": 1.0,
+    "smoothing_iterations": 1,
+    "goal_radius": 3.0,
+    "uav_radius": 0.7,
+    "safety_radius": 4.0,
+    "lidar_range": 24.0,
+    "lidar_resolution": 0.8,
+    "collision_resolution": 0.4,
+    "min_start_goal_distance": 35.0,
+    "progress_reward_scale": 6.0,
+    "distance_penalty_scale": 0.25,
+    "step_penalty": 0.03,
+    "hover_penalty": 0.08,
+    "turn_penalty_scale": 0.04,
+    "proximity_penalty_scale": 1.0,
+    "altitude_penalty_scale": 0.01,
+    "acceleration_penalty_scale": 0.06,
+    "jerk_penalty_scale": 0.04,
+    "speed_penalty_scale": 0.03,
+    "velocity_alignment_reward_scale": 0.12,
+    "braking_risk_penalty_scale": 2.0,
+    "speed_clip_penalty_scale": 0.5,
+    "goal_reward": 140.0,
+    "collision_penalty": -140.0,
+    "timeout_penalty": -30.0,
+    "obstacles": [
+      {
+        "xmin": 366.7663643857976,
+        "ymin": 532.363931935845,
+        "zmin": 0.0,
+        "xmax": 397.2336356142024,
+        "ymax": 557.636068064155,
+        "zmax": 10.0,
+        "name": "east_north_01_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 396.2414644076905,
+        "ymin": 523.8626279919023,
+        "zmin": 0.0,
+        "xmax": 424.8494446832186,
+        "ymax": 549.6084463882629,
+        "zmax": 10.0,
+        "name": "east_north_02_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 424.9197000521621,
+        "ymin": 519.0785572872511,
+        "zmin": 0.0,
+        "xmax": 453.26211812965613,
+        "ymax": 541.1693765970464,
+        "zmax": 10.0,
+        "name": "east_north_03_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 455.0882330286525,
+        "ymin": 513.8867853217484,
+        "zmin": 0.0,
+        "xmax": 480.18449424407476,
+        "ymax": 536.4437931906482,
+        "zmax": 10.0,
+        "name": "east_north_04_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 485.64937896176457,
+        "ymin": 512.6916437084077,
+        "zmin": 0.0,
+        "xmax": 506.7142574018718,
+        "ymax": 531.0273645560552,
+        "zmax": 10.0,
+        "name": "east_north_05_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 511.01504083387783,
+        "ymin": 510.3769450466681,
+        "zmin": 0.0,
+        "xmax": 538.4395046206677,
+        "ymax": 530.0362780938277,
+        "zmax": 10.0,
+        "name": "east_north_06_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 540.5311367217861,
+        "ymin": 509.40630370421434,
+        "zmin": 0.0,
+        "xmax": 566.0143178236684,
+        "ymax": 531.0069194362815,
+        "zmax": 10.0,
+        "name": "east_north_07_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 568.2537298511468,
+        "ymin": 511.93392895514296,
+        "zmin": 0.0,
+        "xmax": 595.3826337852167,
+        "ymax": 531.7850793093199,
+        "zmax": 10.0,
+        "name": "east_north_08_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 597.8155057559252,
+        "ymin": 513.8867853217484,
+        "zmin": 0.0,
+        "xmax": 622.9117669713476,
+        "ymax": 536.4437931906482,
+        "zmax": 10.0,
+        "name": "east_north_09_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 627.7774209952346,
+        "ymin": 520.1644717972358,
+        "zmin": 0.0,
+        "xmax": 650.0407608229474,
+        "ymax": 540.0834620870617,
+        "zmax": 10.0,
+        "name": "east_north_10_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 652.4350148469896,
+        "ymin": 524.5781684616941,
+        "zmin": 0.0,
+        "xmax": 682.4740760621014,
+        "ymax": 548.8929059184711,
+        "zmax": 10.0,
+        "name": "east_north_11_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 681.4157562733094,
+        "ymin": 531.7145400483332,
+        "zmin": 0.0,
+        "xmax": 710.5842437266906,
+        "ymax": 558.2854599516668,
+        "zmax": 10.0,
+        "name": "east_north_12_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 359.7929736724858,
+        "ymin": 422.2654738326202,
+        "zmin": 0.0,
+        "xmax": 388.2070263275142,
+        "ymax": 447.7345261673798,
+        "zmax": 10.0,
+        "name": "east_row2_01_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 387.33168316831683,
+        "ymin": 417.84928492849286,
+        "zmin": 0.0,
+        "xmax": 415.66831683168317,
+        "ymax": 439.92849284928496,
+        "zmax": 10.0,
+        "name": "east_row2_02_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 416.34532268193385,
+        "ymin": 412.47567841789737,
+        "zmin": 0.0,
+        "xmax": 441.65467731806615,
+        "ymax": 435.30209935988046,
+        "zmax": 10.0,
+        "name": "east_row2_03_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 445.7759758548553,
+        "ymin": 410.584579476627,
+        "zmin": 0.0,
+        "xmax": 467.2240241451447,
+        "ymax": 429.415420523373,
+        "zmax": 10.0,
+        "name": "east_row2_04_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 469.9332728250932,
+        "ymin": 406.8203166507081,
+        "zmin": 0.0,
+        "xmax": 498.0667271749068,
+        "ymax": 427.62412779373636,
+        "zmax": 10.0,
+        "name": "east_row2_05_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 498.665405714567,
+        "ymin": 404.6385885772788,
+        "zmin": 0.0,
+        "xmax": 524.334594285433,
+        "ymax": 426.47252253383226,
+        "zmax": 10.0,
+        "name": "east_row2_06_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 526.0,
+        "ymin": 406.0,
+        "zmin": 0.0,
+        "xmax": 552.0,
+        "ymax": 424.0,
+        "zmax": 10.0,
+        "name": "east_row2_07_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 554.68477601995,
+        "ymin": 405.17855205587284,
+        "zmin": 0.0,
+        "xmax": 578.31522398005,
+        "ymax": 425.93255905523824,
+        "zmax": 10.0,
+        "name": "east_row2_08_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 583.5024466119138,
+        "ymin": 408.09897693540825,
+        "zmin": 0.0,
+        "xmax": 604.4975533880862,
+        "ymax": 426.3454675090362,
+        "zmax": 10.0,
+        "name": "east_row2_09_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 607.1810762502181,
+        "ymin": 409.17068590827597,
+        "zmin": 0.0,
+        "xmax": 635.8189237497819,
+        "ymax": 430.82931409172403,
+        "zmax": 10.0,
+        "name": "east_row2_10_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 635.2783592069379,
+        "ymin": 411.8225372252598,
+        "zmin": 0.0,
+        "xmax": 662.7216407930621,
+        "ymax": 435.95524055251803,
+        "zmax": 10.0,
+        "name": "east_row2_11_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 662.3316831683169,
+        "ymin": 417.84928492849286,
+        "zmin": 0.0,
+        "xmax": 690.6683168316831,
+        "ymax": 439.92849284928496,
+        "zmax": 10.0,
+        "name": "east_row2_12_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 690.8826237909852,
+        "ymin": 422.9869989110861,
+        "zmin": 0.0,
+        "xmax": 717.1173762090148,
+        "ymax": 447.0130010889139,
+        "zmax": 10.0,
+        "name": "east_row2_13_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 350.8019358650664,
+        "ymin": 316.90039737596373,
+        "zmin": 0.0,
+        "xmax": 379.1980641349336,
+        "ymax": 339.09960262403627,
+        "zmax": 10.0,
+        "name": "east_row3_01_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 378.7920222687776,
+        "ymin": 311.35743308651814,
+        "zmin": 0.0,
+        "xmax": 404.2849008081455,
+        "ymax": 334.41771484247596,
+        "zmax": 10.0,
+        "name": "east_row3_02_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 407.22965872471843,
+        "ymin": 309.05004412623435,
+        "zmin": 0.0,
+        "xmax": 428.92418742912776,
+        "ymax": 328.2043937435881,
+        "zmax": 10.0,
+        "name": "east_row3_03_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 430.349777615496,
+        "ymin": 304.4816217444611,
+        "zmin": 0.0,
+        "xmax": 458.8809916152733,
+        "ymax": 325.95624807802415,
+        "zmax": 10.0,
+        "name": "east_row3_04_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 458.0074217975054,
+        "ymin": 301.34986517465217,
+        "zmin": 0.0,
+        "xmax": 484.300270510187,
+        "ymax": 323.97557861233,
+        "zmax": 10.0,
+        "name": "east_row3_05_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 484.36830899181217,
+        "ymin": 301.43753124330186,
+        "zmin": 0.0,
+        "xmax": 511.0163063928033,
+        "ymax": 320.4796285200118,
+        "zmax": 10.0,
+        "name": "east_row3_06_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 512.6035815936848,
+        "ymin": 299.955050824346,
+        "zmin": 0.0,
+        "xmax": 535.8579568678538,
+        "ymax": 320.2579669271332,
+        "zmax": 10.0,
+        "name": "east_row3_07_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 540.6659270483015,
+        "ymin": 301.47893474050124,
+        "zmin": 0.0,
+        "xmax": 560.87253449016,
+        "ymax": 318.734083010978,
+        "zmax": 10.0,
+        "name": "east_row3_08_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 563.4602200700065,
+        "ymin": 300.9140577061116,
+        "zmin": 0.0,
+        "xmax": 591.1551645453783,
+        "ymax": 321.00310205720206,
+        "zmax": 10.0,
+        "name": "east_row3_09_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 590.6997294898131,
+        "ymin": 301.34986517465217,
+        "zmin": 0.0,
+        "xmax": 616.9925782024945,
+        "ymax": 323.97557861233,
+        "zmax": 10.0,
+        "name": "east_row3_10_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 616.6717168101655,
+        "ymin": 305.0343301698998,
+        "zmin": 0.0,
+        "xmax": 644.0975139590654,
+        "ymax": 325.40353965258544,
+        "zmax": 10.0,
+        "name": "east_row3_11_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 644.3767326576776,
+        "ymin": 307.3509642130397,
+        "zmin": 0.0,
+        "xmax": 669.4694211884762,
+        "ymax": 329.9034736567828,
+        "zmax": 10.0,
+        "name": "east_row3_12_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 672.4530917759398,
+        "ymin": 313.0954256706035,
+        "zmin": 0.0,
+        "xmax": 694.4699851471371,
+        "ymax": 332.6797222583906,
+        "zmax": 10.0,
+        "name": "east_row3_13_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 695.2103340106506,
+        "ymin": 316.30879552154784,
+        "zmin": 0.0,
+        "xmax": 724.7896659893494,
+        "ymax": 339.69120447845216,
+        "zmax": 10.0,
+        "name": "east_row3_14_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 342.2493572131009,
+        "ymin": 209.4644812424206,
+        "zmin": 0.0,
+        "xmax": 367.7506427868991,
+        "ymax": 232.5355187575794,
+        "zmax": 10.0,
+        "name": "east_row4_01_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 369.8999886096945,
+        "ymin": 207.1270007565527,
+        "zmin": 0.0,
+        "xmax": 391.67143996173405,
+        "ymax": 226.38320332507996,
+        "zmax": 10.0,
+        "name": "east_row4_02_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 392.22032161738696,
+        "ymin": 202.27795108233875,
+        "zmin": 0.0,
+        "xmax": 420.92253552547015,
+        "ymax": 224.04857952990614,
+        "zmax": 10.0,
+        "name": "east_row4_03_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 419.0538966363108,
+        "ymin": 198.70947897922153,
+        "zmin": 0.0,
+        "xmax": 445.66038907797486,
+        "ymax": 221.73950061261522,
+        "zmax": 10.0,
+        "name": "east_row4_04_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 444.64414372792197,
+        "ymin": 198.12552187000193,
+        "zmin": 0.0,
+        "xmax": 471.64157055779225,
+        "ymax": 217.75202915040626,
+        "zmax": 10.0,
+        "name": "east_row4_05_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 472.0360304643122,
+        "ymin": 195.83577875045162,
+        "zmin": 0.0,
+        "xmax": 495.8211123928307,
+        "ymax": 216.77646614750753,
+        "zmax": 10.0,
+        "name": "east_row4_06_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 499.55228089169344,
+        "ymin": 196.62606741514062,
+        "zmin": 0.0,
+        "xmax": 519.8762905368778,
+        "ymax": 214.0269938093492,
+        "zmax": 10.0,
+        "name": "east_row4_07_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 522.0,
+        "ymin": 195.5,
+        "zmin": 0.0,
+        "xmax": 549.0,
+        "ymax": 214.5,
+        "zmax": 10.0,
+        "name": "east_row4_08_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 548.5738741546683,
+        "ymin": 194.5634126485162,
+        "zmin": 0.0,
+        "xmax": 573.9975544167602,
+        "ymax": 216.08964857597363,
+        "zmax": 10.0,
+        "name": "east_row4_09_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 573.7313962953058,
+        "ymin": 196.75861621480692,
+        "zmin": 0.0,
+        "xmax": 600.4114608475513,
+        "ymax": 215.85362868315224,
+        "zmax": 10.0,
+        "name": "east_row4_10_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 600.7783573864665,
+        "ymin": 197.24203745505258,
+        "zmin": 0.0,
+        "xmax": 624.9359283278193,
+        "ymax": 218.6355135653556,
+        "zmax": 10.0,
+        "name": "east_row4_11_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 628.0284602598808,
+        "ymin": 200.95126946604356,
+        "zmin": 0.0,
+        "xmax": 649.2572540258334,
+        "ymax": 219.4977101257932,
+        "zmax": 10.0,
+        "name": "east_row4_12_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 650.0774644745297,
+        "ymin": 202.27795108233875,
+        "zmin": 0.0,
+        "xmax": 678.7796783826129,
+        "ymax": 224.04857952990614,
+        "zmax": 10.0,
+        "name": "east_row4_13_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 676.5564655825846,
+        "ymin": 204.77411443145658,
+        "zmin": 0.0,
+        "xmax": 703.872105845987,
+        "ymax": 228.73608965017607,
+        "zmax": 10.0,
+        "name": "east_row4_14_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 701.9469515475562,
+        "ymin": 210.18728229240872,
+        "zmin": 0.0,
+        "xmax": 730.0530484524438,
+        "ymax": 231.81271770759128,
+        "zmax": 10.0,
+        "name": "east_row4_15_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 333.82498827764783,
+        "ymin": 104.9809463439114,
+        "zmin": 0.0,
+        "xmax": 356.17501172235217,
+        "ymax": 125.0190536560886,
+        "zmax": 10.0,
+        "name": "east_south_01_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 355.46645241479337,
+        "ymin": 98.56586712328539,
+        "zmin": 0.0,
+        "xmax": 384.8002142518733,
+        "ymax": 121.47857732115907,
+        "zmax": 10.0,
+        "name": "east_south_02_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 381.5845437161543,
+        "ymin": 93.74212009975054,
+        "zmin": 0.0,
+        "xmax": 408.948789617179,
+        "ymax": 117.76899101136058,
+        "zmax": 10.0,
+        "name": "east_south_03_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 406.6039793851896,
+        "ymin": 91.86674162678909,
+        "zmin": 0.0,
+        "xmax": 434.1960206148104,
+        "ymax": 112.53325837321091,
+        "zmax": 10.0,
+        "name": "east_south_04_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 433.29121085765127,
+        "ymin": 88.4583138155876,
+        "zmin": 0.0,
+        "xmax": 457.77545580901534,
+        "ymax": 110.25279729552351,
+        "zmax": 10.0,
+        "name": "east_south_05_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 460.2279807641407,
+        "ymin": 88.17396152092252,
+        "zmin": 0.0,
+        "xmax": 481.1053525691926,
+        "ymax": 106.27048292352194,
+        "zmax": 10.0,
+        "name": "east_south_06_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 481.9923267047959,
+        "ymin": 85.81912060857208,
+        "zmin": 0.0,
+        "xmax": 509.6076732952041,
+        "ymax": 105.78087939142792,
+        "zmax": 10.0,
+        "name": "east_south_07_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 508.31414832666127,
+        "ymin": 84.44121306632192,
+        "zmin": 0.0,
+        "xmax": 533.5525183400055,
+        "ymax": 105.73656471145586,
+        "zmax": 10.0,
+        "name": "east_south_08_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 532.968749721343,
+        "ymin": 85.9339903117755,
+        "zmin": 0.0,
+        "xmax": 559.1645836119902,
+        "ymax": 104.24378746600227,
+        "zmax": 10.0,
+        "name": "east_south_09_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 559.3693268794615,
+        "ymin": 85.40437459337748,
+        "zmin": 0.0,
+        "xmax": 583.0306731205386,
+        "ymax": 106.19562540662251,
+        "zmax": 10.0,
+        "name": "east_south_10_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 585.8946474308074,
+        "ymin": 88.17396152092252,
+        "zmin": 0.0,
+        "xmax": 606.7720192358591,
+        "ymax": 106.27048292352194,
+        "zmax": 10.0,
+        "name": "east_south_11_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 607.2835517781712,
+        "ymin": 88.75878929563102,
+        "zmin": 0.0,
+        "xmax": 635.6497815551622,
+        "ymax": 109.95232181548009,
+        "zmax": 10.0,
+        "name": "east_south_12_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 633.1105233070333,
+        "ymin": 90.44190442783307,
+        "zmin": 0.0,
+        "xmax": 660.0894766929667,
+        "ymax": 113.95809557216694,
+        "zmax": 10.0,
+        "name": "east_south_13_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 657.787802383002,
+        "ymin": 95.14739959463884,
+        "zmin": 0.0,
+        "xmax": 685.6788642836647,
+        "ymax": 116.36371151647228,
+        "zmax": 10.0,
+        "name": "east_south_14_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 684.0763606990215,
+        "ymin": 98.43586343692823,
+        "zmin": 0.0,
+        "xmax": 709.6569726343118,
+        "ymax": 121.60858100751622,
+        "zmax": 10.0,
+        "name": "east_south_15_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 710.8249882776479,
+        "ymin": 104.9809463439114,
+        "zmin": 0.0,
+        "xmax": 733.1750117223521,
+        "ymax": 125.0190536560886,
+        "zmax": 10.0,
+        "name": "east_south_16_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 67.11236434348746,
+        "ymin": 445.1626700161144,
+        "zmin": 0.0,
+        "xmax": 96.88763565651254,
+        "ymax": 470.8373299838856,
+        "zmax": 10.0,
+        "name": "west_north_01_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 101.96563946405128,
+        "ymin": 457.87167147348936,
+        "zmin": 0.0,
+        "xmax": 128.70102720261536,
+        "ymax": 482.5727729709551,
+        "zmax": 10.0,
+        "name": "west_north_02_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 137.80810513411322,
+        "ymin": 467.9634451132853,
+        "zmin": 0.0,
+        "xmax": 159.5252281992201,
+        "ymax": 487.1476659978258,
+        "zmax": 10.0,
+        "name": "west_north_03_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 168.5,
+        "ymin": 470.5,
+        "zmin": 0.0,
+        "xmax": 195.5,
+        "ymax": 489.5,
+        "zmax": 10.0,
+        "name": "west_north_04_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 201.71100614021407,
+        "ymin": 465.62182981614717,
+        "zmin": 0.0,
+        "xmax": 228.95566052645256,
+        "ymax": 489.4892812949639,
+        "zmax": 10.0,
+        "name": "west_north_05_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 234.14109289286012,
+        "ymin": 458.4090301032134,
+        "zmin": 0.0,
+        "xmax": 263.19224044047326,
+        "ymax": 482.03541434123105,
+        "zmax": 10.0,
+        "name": "west_north_06_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 268.0825982778556,
+        "ymin": 444.85146290509067,
+        "zmin": 0.0,
+        "xmax": 295.9174017221444,
+        "ymax": 471.14853709490933,
+        "zmax": 10.0,
+        "name": "west_north_07_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 54.51984432141487,
+        "ymin": 351.49373927615346,
+        "zmin": 0.0,
+        "xmax": 81.48015567858513,
+        "ymax": 376.50626072384654,
+        "zmax": 10.0,
+        "name": "west_row2_01_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 89.04286737167448,
+        "ymin": 362.70325678337923,
+        "zmin": 0.0,
+        "xmax": 111.52856119975408,
+        "ymax": 382.9293962778452,
+        "zmax": 10.0,
+        "name": "west_row2_02_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 118.16253806866565,
+        "ymin": 367.70709262071483,
+        "zmin": 0.0,
+        "xmax": 146.98031907419147,
+        "ymax": 389.680662481326,
+        "zmax": 10.0,
+        "name": "west_row2_03_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 151.98154848802787,
+        "ymin": 370.6640606659078,
+        "zmin": 0.0,
+        "xmax": 177.7327372262578,
+        "ymax": 392.6012454565412,
+        "zmax": 10.0,
+        "name": "west_row2_04_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 183.8359772280123,
+        "ymin": 372.1397770939762,
+        "zmin": 0.0,
+        "xmax": 210.44973705770198,
+        "ymax": 391.12552902847284,
+        "zmax": 10.0,
+        "name": "west_row2_05_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 216.9336550527173,
+        "ymin": 367.48225076483783,
+        "zmin": 0.0,
+        "xmax": 241.92348780442558,
+        "ymax": 389.905504337203,
+        "zmax": 10.0,
+        "name": "west_row2_06_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 250.47143880024586,
+        "ymin": 362.70325678337923,
+        "zmin": 0.0,
+        "xmax": 272.95713262832544,
+        "ymax": 382.9293962778452,
+        "zmax": 10.0,
+        "name": "west_row2_07_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 278.7659902037904,
+        "ymin": 351.3630434164266,
+        "zmin": 0.0,
+        "xmax": 309.2340097962096,
+        "ymax": 376.6369565835734,
+        "zmax": 10.0,
+        "name": "west_row2_08_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 43.70800850251145,
+        "ymin": 260.8181651180371,
+        "zmin": 0.0,
+        "xmax": 66.29199149748855,
+        "ymax": 281.1818348819629,
+        "zmax": 10.0,
+        "name": "west_row3_01_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 71.73195996148736,
+        "ymin": 266.15080766363826,
+        "zmin": 0.0,
+        "xmax": 101.01804003851264,
+        "ymax": 288.97419233636174,
+        "zmax": 10.0,
+        "name": "west_row3_02_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 104.31544819518852,
+        "ymin": 270.56395949002564,
+        "zmin": 0.0,
+        "xmax": 131.1845518048115,
+        "ymax": 293.93604050997436,
+        "zmax": 10.0,
+        "name": "west_row3_03_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 135.72700840027014,
+        "ymin": 275.4187666243263,
+        "zmin": 0.0,
+        "xmax": 162.52299159972986,
+        "ymax": 294.7062333756737,
+        "zmax": 10.0,
+        "name": "west_row3_04_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 169.0,
+        "ymin": 276.0,
+        "zmin": 0.0,
+        "xmax": 192.0,
+        "ymax": 296.0,
+        "zmax": 10.0,
+        "name": "west_row3_05_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 201.5014929123408,
+        "ymin": 276.09683974636187,
+        "zmin": 0.0,
+        "xmax": 222.2485070876592,
+        "ymax": 294.02816025363813,
+        "zmax": 10.0,
+        "name": "west_row3_06_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 228.94119254777,
+        "ymin": 271.4382151374442,
+        "zmin": 0.0,
+        "xmax": 257.55880745223,
+        "ymax": 293.0617848625558,
+        "zmax": 10.0,
+        "name": "west_row3_07_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 260.7897968870251,
+        "ymin": 265.3429707381005,
+        "zmin": 0.0,
+        "xmax": 288.4602031129749,
+        "ymax": 289.7820292618995,
+        "zmax": 10.0,
+        "name": "west_row3_08_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 291.6739679092948,
+        "ymin": 259.6343855506965,
+        "zmin": 0.0,
+        "xmax": 320.3260320907052,
+        "ymax": 282.3656144493035,
+        "zmax": 10.0,
+        "name": "west_row3_09_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 27.364781150080866,
+        "ymin": 166.6028978423545,
+        "zmin": 0.0,
+        "xmax": 56.635218849919134,
+        "ymax": 189.3971021576455,
+        "zmax": 10.0,
+        "name": "west_row4_01_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 58.43472635320382,
+        "ymin": 170.8826810107181,
+        "zmin": 0.0,
+        "xmax": 85.56527364679617,
+        "ymax": 194.59880047076336,
+        "zmax": 10.0,
+        "name": "west_row4_02_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 88.36525048716496,
+        "ymin": 176.24903026577155,
+        "zmin": 0.0,
+        "xmax": 115.63474951283504,
+        "ymax": 196.34356232682106,
+        "zmax": 10.0,
+        "name": "west_row4_03_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 120.04339271382557,
+        "ymin": 178.1186993270323,
+        "zmin": 0.0,
+        "xmax": 143.95660728617443,
+        "ymax": 199.21463400630103,
+        "zmax": 10.0,
+        "name": "west_row4_04_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 151.8731902609295,
+        "ymin": 181.19512570926267,
+        "zmin": 0.0,
+        "xmax": 172.1268097390705,
+        "ymax": 198.50857799444103,
+        "zmax": 10.0,
+        "name": "west_row4_05_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 178.35412365004098,
+        "ymin": 180.126198425843,
+        "zmin": 0.0,
+        "xmax": 205.64587634995902,
+        "ymax": 199.5775052778607,
+        "zmax": 10.0,
+        "name": "west_row4_06_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 209.01556619115325,
+        "ymin": 177.56041945320672,
+        "zmin": 0.0,
+        "xmax": 234.98443380884675,
+        "ymax": 199.7729138801266,
+        "zmax": 10.0,
+        "name": "west_row4_07_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 238.36525048716496,
+        "ymin": 176.24903026577155,
+        "zmin": 0.0,
+        "xmax": 265.634749512835,
+        "ymax": 196.34356232682106,
+        "zmax": 10.0,
+        "name": "west_row4_08_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 269.49378598925387,
+        "ymin": 171.51493716757477,
+        "zmin": 0.0,
+        "xmax": 294.50621401074613,
+        "ymax": 193.9665443139067,
+        "zmax": 10.0,
+        "name": "west_row4_09_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 300.985783262049,
+        "ymin": 168.20007702165165,
+        "zmin": 0.0,
+        "xmax": 323.014216737951,
+        "ymax": 187.79992297834835,
+        "zmax": 10.0,
+        "name": "west_row4_10_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 16.43049997579876,
+        "ymin": 70.13634777960489,
+        "zmin": 0.0,
+        "xmax": 43.56950002420124,
+        "ymax": 93.86365222039511,
+        "zmax": 10.0,
+        "name": "west_south_01_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 45.09425823606626,
+        "ymin": 75.42806707046135,
+        "zmin": 0.0,
+        "xmax": 72.50574176393373,
+        "ymax": 95.77193292953864,
+        "zmax": 10.0,
+        "name": "west_south_02_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 75.46845145784373,
+        "ymin": 77.63870187543044,
+        "zmin": 0.0,
+        "xmax": 99.73154854215626,
+        "ymax": 99.16129812456957,
+        "zmax": 10.0,
+        "name": "west_south_03_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 106.05176204681028,
+        "ymin": 81.46624754718464,
+        "zmin": 0.0,
+        "xmax": 126.7482379531897,
+        "ymax": 99.33375245281538,
+        "zmax": 10.0,
+        "name": "west_south_04_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 131.49618115819106,
+        "ymin": 81.78357057184054,
+        "zmin": 0.0,
+        "xmax": 158.9038188418089,
+        "ymax": 101.41642942815945,
+        "zmax": 10.0,
+        "name": "west_south_05_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 161.5,
+        "ymin": 81.5,
+        "zmin": 0.0,
+        "xmax": 186.5,
+        "ymax": 102.5,
+        "zmax": 10.0,
+        "name": "west_south_06_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 189.60987190213763,
+        "ymin": 82.29726131578707,
+        "zmin": 0.0,
+        "xmax": 215.99012809786234,
+        "ymax": 100.90273868421292,
+        "zmax": 10.0,
+        "name": "west_south_07_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 219.6708664875684,
+        "ymin": 79.88535198794273,
+        "zmin": 0.0,
+        "xmax": 243.5291335124316,
+        "ymax": 100.91464801205728,
+        "zmax": 10.0,
+        "name": "west_south_08_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 249.88783831499163,
+        "ymin": 79.25808873257837,
+        "zmin": 0.0,
+        "xmax": 270.9121616850083,
+        "ymax": 97.54191126742164,
+        "zmax": 10.0,
+        "name": "west_south_09_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 274.942100605692,
+        "ymin": 74.87590944008711,
+        "zmin": 0.0,
+        "xmax": 303.45789939430796,
+        "ymax": 96.32409055991288,
+        "zmax": 10.0,
+        "name": "west_south_10_lanxianghu_villa_estimated_low"
+      },
+      {
+        "xmin": 304.43049997579874,
+        "ymin": 70.13634777960489,
+        "zmin": 0.0,
+        "xmax": 331.56950002420126,
+        "ymax": 93.86365222039511,
+        "zmax": 10.0,
+        "name": "west_south_11_lanxianghu_villa_estimated_low"
+      }
+    ]
+  }
+}

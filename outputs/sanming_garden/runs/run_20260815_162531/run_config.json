@@ -1,0 +1,341 @@
+{
+  "scene_key": "sanming_garden",
+  "scene_display_name": "三明花园",
+  "checkpoint_path": "outputs\\sanming_garden\\models\\sanming_garden_dqn.pt",
+  "evaluation_goal_sampling": {
+    "near_obstacle_probability": 0.7,
+    "min_clearance_m": 2.0,
+    "max_clearance_m": 12.0
+  },
+  "config": {
+    "scene_name": "sanming_garden_estimated",
+    "coordinate_system": "local_enu_from_gcj02_origin",
+    "origin_lon_gcj02": 121.4264,
+    "origin_lat_gcj02": 31.0161,
+    "obstacle_inflation": 2.0,
+    "map_x_min": 0.0,
+    "map_y_min": 0.0,
+    "map_width": 520.0,
+    "map_height": 320.0,
+    "map_altitude": 40.0,
+    "step_length": 2.0,
+    "max_steps": 320,
+    "trajectory_dt": 0.5,
+    "max_horizontal_speed": 23.0,
+    "max_speed": 23.18,
+    "max_climb_speed": 2.85,
+    "max_descent_speed": 1.65,
+    "max_climb_angle_deg": 90.0,
+    "max_acceleration": 15.5,
+    "normal_acceleration": 3.0,
+    "max_deceleration": 3.09,
+    "max_jerk": 78.0,
+    "raw_max_jerk": 142.0,
+    "goal_speed_tolerance": 1.0,
+    "smoothing_iterations": 1,
+    "goal_radius": 3.0,
+    "uav_radius": 0.7,
+    "safety_radius": 4.0,
+    "lidar_range": 24.0,
+    "lidar_resolution": 0.8,
+    "collision_resolution": 0.4,
+    "min_start_goal_distance": 35.0,
+    "reward_shaping_version": 2,
+    "progress_reward_scale": 6.0,
+    "distance_penalty_scale": 0.25,
+    "step_penalty": 0.03,
+    "hover_penalty": 0.08,
+    "turn_penalty_scale": 0.2,
+    "turn_speed_threshold": 0.5,
+    "detour_penalty_scale": 0.35,
+    "proximity_penalty_scale": 1.0,
+    "altitude_penalty_scale": 0.01,
+    "extra_altitude_penalty_scale": 0.12,
+    "extra_altitude_margin": 3.0,
+    "goal_guidance_distance": 60.0,
+    "goal_altitude_penalty_scale": 0.08,
+    "vertical_speed_guidance_scale": 0.3,
+    "vertical_guidance_time": 4.0,
+    "acceleration_penalty_scale": 0.06,
+    "jerk_penalty_scale": 0.04,
+    "speed_penalty_scale": 0.03,
+    "velocity_alignment_reward_scale": 0.12,
+    "braking_risk_penalty_scale": 2.0,
+    "speed_clip_penalty_scale": 0.5,
+    "goal_reward": 140.0,
+    "collision_penalty": -140.0,
+    "timeout_penalty": -30.0,
+    "obstacles": [
+      {
+        "xmin": 85.8987885727793,
+        "ymin": 266.59950848100414,
+        "zmin": 0.0,
+        "xmax": 136.10121142722068,
+        "ymax": 283.40049151899586,
+        "zmax": 20.0,
+        "name": "20-24_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 149.87337148734142,
+        "ymin": 265.0124749060831,
+        "zmin": 0.0,
+        "xmax": 210.12662851265858,
+        "ymax": 284.9875250939169,
+        "zmax": 20.0,
+        "name": "46-54_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 223.89757013403045,
+        "ymin": 266.73912773250237,
+        "zmin": 0.0,
+        "xmax": 258.10242986596955,
+        "ymax": 283.26087226749763,
+        "zmax": 20.0,
+        "name": "66-68_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 271.89878857277927,
+        "ymin": 266.59950848100414,
+        "zmin": 0.0,
+        "xmax": 322.10121142722073,
+        "ymax": 283.40049151899586,
+        "zmax": 20.0,
+        "name": "78-82_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 335.8975701340304,
+        "ymin": 266.73912773250237,
+        "zmin": 0.0,
+        "xmax": 370.1024298659696,
+        "ymax": 283.26087226749763,
+        "zmax": 20.0,
+        "name": "98-100_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 383.89878857277927,
+        "ymin": 266.59950848100414,
+        "zmin": 0.0,
+        "xmax": 434.10121142722073,
+        "ymax": 283.40049151899586,
+        "zmax": 20.0,
+        "name": "120-124_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 92.5,
+        "ymin": 218.0,
+        "zmin": 0.0,
+        "xmax": 119.5,
+        "ymax": 232.0,
+        "zmax": 20.0,
+        "name": "18_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 135.5,
+        "ymin": 215.5,
+        "zmin": 0.0,
+        "xmax": 195.5,
+        "ymax": 234.5,
+        "zmax": 20.0,
+        "name": "40-46_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 211.5,
+        "ymin": 217.0,
+        "zmin": 0.0,
+        "xmax": 245.5,
+        "ymax": 233.0,
+        "zmax": 20.0,
+        "name": "62-64_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 261.5,
+        "ymin": 217.0,
+        "zmin": 0.0,
+        "xmax": 311.5,
+        "ymax": 233.0,
+        "zmax": 20.0,
+        "name": "72-76_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 327.5,
+        "ymin": 217.0,
+        "zmin": 0.0,
+        "xmax": 361.5,
+        "ymax": 233.0,
+        "zmax": 20.0,
+        "name": "94-96_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 377.5,
+        "ymin": 217.0,
+        "zmin": 0.0,
+        "xmax": 427.5,
+        "ymax": 233.0,
+        "zmax": 20.0,
+        "name": "114-118_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 133.91448947351506,
+        "ymin": 162.8000588501893,
+        "zmin": 0.0,
+        "xmax": 161.08551052648494,
+        "ymax": 177.1999411498107,
+        "zmax": 20.0,
+        "name": "12_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 184.91448947351506,
+        "ymin": 162.8000588501893,
+        "zmin": 0.0,
+        "xmax": 212.08551052648494,
+        "ymax": 177.1999411498107,
+        "zmax": 20.0,
+        "name": "56_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 235.89757013403045,
+        "ymin": 161.7391277325024,
+        "zmin": 0.0,
+        "xmax": 270.1024298659696,
+        "ymax": 178.2608722674976,
+        "zmax": 20.0,
+        "name": "58-60_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 293.8975701340304,
+        "ymin": 161.7391277325024,
+        "zmin": 0.0,
+        "xmax": 328.1024298659696,
+        "ymax": 178.2608722674976,
+        "zmax": 20.0,
+        "name": "88-90_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 351.8975701340304,
+        "ymin": 161.7391277325024,
+        "zmin": 0.0,
+        "xmax": 386.1024298659696,
+        "ymax": 178.2608722674976,
+        "zmax": 20.0,
+        "name": "110-112_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 93.0,
+        "ymin": 107.0,
+        "zmin": 0.0,
+        "xmax": 127.0,
+        "ymax": 123.0,
+        "zmax": 20.0,
+        "name": "4-6_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 140.0,
+        "ymin": 107.0,
+        "zmin": 0.0,
+        "xmax": 190.0,
+        "ymax": 123.0,
+        "zmax": 20.0,
+        "name": "26-30_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 203.0,
+        "ymin": 108.0,
+        "zmin": 0.0,
+        "xmax": 230.0,
+        "ymax": 122.0,
+        "zmax": 20.0,
+        "name": "32_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 243.0,
+        "ymin": 108.0,
+        "zmin": 0.0,
+        "xmax": 270.0,
+        "ymax": 122.0,
+        "zmax": 20.0,
+        "name": "34_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 283.0,
+        "ymin": 107.0,
+        "zmin": 0.0,
+        "xmax": 317.0,
+        "ymax": 123.0,
+        "zmax": 20.0,
+        "name": "36-38_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 330.0,
+        "ymin": 107.0,
+        "zmin": 0.0,
+        "xmax": 364.0,
+        "ymax": 123.0,
+        "zmax": 20.0,
+        "name": "84-86_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 377.0,
+        "ymin": 107.0,
+        "zmin": 0.0,
+        "xmax": 427.0,
+        "ymax": 123.0,
+        "zmax": 20.0,
+        "name": "102-106_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 60.39801297519589,
+        "ymin": 48.10979002043415,
+        "zmin": 0.0,
+        "xmax": 120.60198702480412,
+        "ymax": 67.89020997956585,
+        "zmax": 20.0,
+        "name": "2-10_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 135.41768905782558,
+        "ymin": 49.791152150856995,
+        "zmin": 0.0,
+        "xmax": 169.58231094217442,
+        "ymax": 66.20884784914301,
+        "zmax": 20.0,
+        "name": "14-16_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 184.39801297519588,
+        "ymin": 48.10979002043415,
+        "zmin": 0.0,
+        "xmax": 244.60198702480412,
+        "ymax": 67.89020997956585,
+        "zmax": 20.0,
+        "name": "21-29_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 259.3980129751959,
+        "ymin": 48.10979002043415,
+        "zmin": 0.0,
+        "xmax": 319.6019870248041,
+        "ymax": 67.89020997956585,
+        "zmax": 20.0,
+        "name": "31-39_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 334.3980129751959,
+        "ymin": 48.10979002043415,
+        "zmin": 0.0,
+        "xmax": 394.6019870248041,
+        "ymax": 67.89020997956585,
+        "zmax": 20.0,
+        "name": "41-55_sanming_garden_estimated_medium"
+      },
+      {
+        "xmin": 409.4184688657511,
+        "ymin": 49.67945470814384,
+        "zmin": 0.0,
+        "xmax": 459.5815311342489,
+        "ymax": 66.32054529185616,
+        "zmax": 20.0,
+        "name": "57-61_sanming_garden_estimated_medium"
+      }
+    ]
+  }
+}

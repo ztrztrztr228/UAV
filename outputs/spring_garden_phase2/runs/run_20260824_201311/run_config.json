@@ -1,0 +1,278 @@
+{
+  "scene_key": "spring_garden_phase2",
+  "scene_display_name": "春天花园二期",
+  "checkpoint_path": "outputs\\spring_garden_phase2\\models\\spring_garden_phase2_dqn_candidate.pt",
+  "training_goal_sampling": {
+    "start_probability": 0.1,
+    "final_probability": 0.5,
+    "start_min_clearance_m": 15.0,
+    "start_max_clearance_m": 30.0,
+    "final_min_clearance_m": 5.0,
+    "final_max_clearance_m": 15.0,
+    "curriculum_episodes": 2000,
+    "start_max_distance_m": 200.0,
+    "final_max_distance_m": 631.9018911191831,
+    "start_altitude_m": [
+      5.0,
+      20.0
+    ],
+    "final_altitude_m": [
+      5.0,
+      40.0
+    ],
+    "side_clearance_only": true
+  },
+  "safe_action_mask": true,
+  "pure_policy_validation": {
+    "interval": 100,
+    "episodes": 50,
+    "best_checkpoint_path": "outputs\\spring_garden_phase2\\models\\spring_garden_phase2_dqn_candidate_best.pt",
+    "latest_checkpoint_interval": 100
+  },
+  "evaluation_goal_sampling": {
+    "near_obstacle_probability": 0.7,
+    "min_clearance_m": 2.0,
+    "max_clearance_m": 12.0
+  },
+  "config": {
+    "scene_name": "spring_garden_phase2_estimated",
+    "coordinate_system": "local_enu_from_gcj02_origin",
+    "origin_lon_gcj02": 121.4016,
+    "origin_lat_gcj02": 31.2151,
+    "obstacle_inflation": 2.0,
+    "map_x_min": 0.0,
+    "map_y_min": 0.0,
+    "map_width": 520.0,
+    "map_height": 350.0,
+    "map_altitude": 80.0,
+    "step_length": 2.0,
+    "max_steps": 320,
+    "trajectory_dt": 0.5,
+    "max_horizontal_speed": 23.0,
+    "max_speed": 23.18,
+    "max_climb_speed": 2.85,
+    "max_descent_speed": 1.65,
+    "max_climb_angle_deg": 90.0,
+    "max_acceleration": 15.5,
+    "normal_acceleration": 3.0,
+    "max_deceleration": 3.09,
+    "max_jerk": 78.0,
+    "raw_max_jerk": 142.0,
+    "goal_speed_tolerance": 1.0,
+    "smoothing_iterations": 1,
+    "goal_radius": 3.0,
+    "uav_radius": 0.7,
+    "safety_radius": 4.0,
+    "lidar_range": 24.0,
+    "lidar_resolution": 0.8,
+    "collision_resolution": 0.4,
+    "min_start_goal_distance": 35.0,
+    "reward_shaping_version": 2,
+    "progress_reward_scale": 6.0,
+    "distance_penalty_scale": 0.25,
+    "step_penalty": 0.03,
+    "hover_penalty": 0.08,
+    "turn_penalty_scale": 0.2,
+    "turn_speed_threshold": 0.5,
+    "detour_penalty_scale": 0.35,
+    "proximity_penalty_scale": 1.0,
+    "altitude_penalty_scale": 0.01,
+    "extra_altitude_penalty_scale": 0.12,
+    "extra_altitude_margin": 3.0,
+    "goal_guidance_distance": 60.0,
+    "goal_altitude_penalty_scale": 0.08,
+    "vertical_speed_guidance_scale": 0.3,
+    "vertical_guidance_time": 4.0,
+    "acceleration_penalty_scale": 0.06,
+    "jerk_penalty_scale": 0.04,
+    "speed_penalty_scale": 0.03,
+    "velocity_alignment_reward_scale": 0.12,
+    "braking_risk_penalty_scale": 2.0,
+    "speed_clip_penalty_scale": 0.5,
+    "goal_reward": 140.0,
+    "collision_penalty": -140.0,
+    "timeout_penalty": -30.0,
+    "obstacles": [
+      {
+        "xmin": 114.70983826587893,
+        "ymin": 304.59864562122783,
+        "zmin": 0.0,
+        "xmax": 192.29016173412109,
+        "ymax": 325.40135437877217,
+        "zmax": 60.0,
+        "name": "73_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 231.65613184439056,
+        "ymin": 303.6523520427162,
+        "zmin": 0.0,
+        "xmax": 307.3438681556094,
+        "ymax": 326.3476479572838,
+        "zmax": 60.0,
+        "name": "76_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 346.72298682416886,
+        "ymin": 305.5951519729131,
+        "zmin": 0.0,
+        "xmax": 405.27701317583114,
+        "ymax": 324.4048480270869,
+        "zmax": 60.0,
+        "name": "71_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 155.8158378510587,
+        "ymin": 254.57328839775386,
+        "zmin": 0.0,
+        "xmax": 231.1841621489413,
+        "ymax": 275.42671160224614,
+        "zmax": 60.0,
+        "name": "69-66_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 296.81446715096087,
+        "ymin": 254.6779961909853,
+        "zmin": 0.0,
+        "xmax": 364.18553284903913,
+        "ymax": 275.3220038090147,
+        "zmax": 60.0,
+        "name": "67-63_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 157.9446673274183,
+        "ymin": 206.18172895439224,
+        "zmin": 0.0,
+        "xmax": 235.0553326725817,
+        "ymax": 223.81827104560776,
+        "zmax": 60.0,
+        "name": "58-55_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 294.93575040724085,
+        "ymin": 205.22539970881996,
+        "zmin": 0.0,
+        "xmax": 362.06424959275915,
+        "ymax": 224.77460029118004,
+        "zmax": 60.0,
+        "name": "30-26_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 94.93590271498411,
+        "ymin": 155.19049356682643,
+        "zmin": 0.0,
+        "xmax": 170.0640972850159,
+        "ymax": 174.80950643317357,
+        "zmax": 60.0,
+        "name": "64-56_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 193.9357504072408,
+        "ymin": 155.22539970881996,
+        "zmin": 0.0,
+        "xmax": 261.06424959275915,
+        "ymax": 174.77460029118004,
+        "zmax": 60.0,
+        "name": "53-47_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 284.9486688642771,
+        "ymin": 156.76461200315887,
+        "zmin": 0.0,
+        "xmax": 343.0513311357229,
+        "ymax": 173.23538799684113,
+        "zmax": 60.0,
+        "name": "22-18_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 366.9486688642771,
+        "ymin": 156.76461200315887,
+        "zmin": 0.0,
+        "xmax": 425.0513311357229,
+        "ymax": 173.23538799684113,
+        "zmax": 60.0,
+        "name": "31-25_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 95.39211848494938,
+        "ymin": 102.86397714652261,
+        "zmin": 0.0,
+        "xmax": 172.60788151505062,
+        "ymax": 121.13602285347739,
+        "zmax": 60.0,
+        "name": "48-42_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 192.37390455429403,
+        "ymin": 101.95139148355264,
+        "zmin": 0.0,
+        "xmax": 259.62609544570597,
+        "ymax": 122.04860851644736,
+        "zmax": 60.0,
+        "name": "45-41_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 279.37390455429403,
+        "ymin": 101.95139148355264,
+        "zmin": 0.0,
+        "xmax": 346.62609544570597,
+        "ymax": 122.04860851644736,
+        "zmax": 60.0,
+        "name": "16-10_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 366.3993977921537,
+        "ymin": 103.52969885525499,
+        "zmin": 0.0,
+        "xmax": 424.6006022078463,
+        "ymax": 120.47030114474501,
+        "zmax": 60.0,
+        "name": "23-17_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 68.5,
+        "ymin": 49.5,
+        "zmin": 0.0,
+        "xmax": 145.5,
+        "ymax": 66.5,
+        "zmax": 60.0,
+        "name": "40-34_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 159.5,
+        "ymin": 50.0,
+        "zmin": 0.0,
+        "xmax": 217.5,
+        "ymax": 66.0,
+        "zmax": 60.0,
+        "name": "39-37_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 231.5,
+        "ymin": 48.5,
+        "zmin": 0.0,
+        "xmax": 298.5,
+        "ymax": 67.5,
+        "zmax": 60.0,
+        "name": "6-2_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 312.5,
+        "ymin": 48.5,
+        "zmin": 0.0,
+        "xmax": 379.5,
+        "ymax": 67.5,
+        "zmax": 60.0,
+        "name": "15-9_spring_garden_phase2_estimated_low"
+      },
+      {
+        "xmin": 393.5,
+        "ymin": 50.0,
+        "zmin": 0.0,
+        "xmax": 451.5,
+        "ymax": 66.0,
+        "zmax": 60.0,
+        "name": "7-1_spring_garden_phase2_estimated_low"
+      }
+    ]
+  }
+}

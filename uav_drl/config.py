@@ -11,6 +11,7 @@ import numpy as np
 
 DEFAULT_SEED = 2026
 
+# ==================== 场景原始数据 ====================
 # 吴泾试飞场局部 ENU 坐标元数据。经纬度仅用于记录场景基准，仿真内部全部使用米。
 WUJING_ORIGIN_LON_GCJ02 = 121.4480000
 WUJING_ORIGIN_LAT_GCJ02 = 31.0680000
@@ -32,6 +33,7 @@ WUJING_BUILDING_ESTIMATES: tuple[tuple[str, str, float, float, float, float, flo
 )
 
 
+# ==================== 障碍物几何模型 ====================
 @dataclass(frozen=True)
 class BoxObstacle:
     """三维长方体建筑物/禁飞区。
@@ -73,6 +75,7 @@ class BoxObstacle:
 RectObstacle = BoxObstacle
 
 
+# ==================== 吴泾场景障碍物构建 ====================
 def wujing_airfield_obstacles(inflation: float = WUJING_BUILDING_INFLATION_M) -> list[BoxObstacle]:
     """根据公开影像估算值构建吴泾试飞场建筑物包络框。
 
@@ -105,6 +108,7 @@ def wujing_airfield_obstacles(inflation: float = WUJING_BUILDING_INFLATION_M) ->
 default_community_obstacles = wujing_airfield_obstacles
 
 
+# ==================== 统一环境参数 ====================
 @dataclass
 class UAVEnvConfig:
     """三维无人机环境参数配置。"""
@@ -210,6 +214,7 @@ class UAVEnvConfig:
         return math.degrees(math.atan2(self.max_climb_speed, self.max_horizontal_speed))
 
 
+# ==================== Checkpoint 配置序列化 ====================
 def config_to_dict(config: UAVEnvConfig) -> dict[str, object]:
     """把环境配置转换成可以写入 checkpoint 的普通 dict。"""
     data = vars(config).copy()

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import numpy as np
 
 
+# ==================== 等时间轨迹数据结构 ====================
 @dataclass(frozen=True)
 class TimedTrajectory:
     """Trajectory samples with position, velocity, and acceleration."""
@@ -25,6 +26,7 @@ class TimedTrajectory:
     max_acceleration: float
 
 
+# ==================== 直接封装环境动力学样本 ====================
 def dynamics_samples_to_trajectory(
     positions: list[np.ndarray] | np.ndarray,
     velocities: list[np.ndarray] | np.ndarray,
@@ -39,6 +41,7 @@ def dynamics_samples_to_trajectory(
     acceleration = _as_points(accelerations)
     if not (len(position) == len(velocity) == len(acceleration)):
         raise ValueError("Position, velocity, and acceleration sample counts must match.")
+    # 环境每一步时间间隔固定，因此时间轴可直接按样本序号生成。
     time = np.arange(len(position), dtype=np.float64) * float(dt)
     segment_lengths = (
         np.linalg.norm(np.diff(position, axis=0), axis=1)
@@ -63,6 +66,7 @@ def dynamics_samples_to_trajectory(
     )
 
 
+# ==================== 几何路径预处理 ====================
 def _as_points(path: list[np.ndarray] | tuple[np.ndarray, ...] | np.ndarray) -> np.ndarray:
     points = np.asarray(path, dtype=np.float64)
     if points.ndim != 2 or points.shape[1] != 3:
@@ -103,6 +107,7 @@ def _arc_lengths(points: np.ndarray) -> np.ndarray:
     return np.concatenate([[0.0], np.cumsum(segment_lengths)])
 
 
+# ==================== 梯形速度规划 ====================
 def _minimum_duration(length: float, max_speed: float, max_acceleration: float) -> float:
     if length <= 1e-9:
         return 0.0
@@ -182,6 +187,7 @@ def _time_grid(duration: float, dt: float) -> np.ndarray:
     return np.arange(count, dtype=np.float64) * dt
 
 
+# ==================== 几何路径转等时间轨迹（兼容工具） ====================
 def path_to_timed_trajectory(
     path: list[np.ndarray] | tuple[np.ndarray, ...] | np.ndarray,
     dt: float = 1.0,
@@ -205,7 +211,7 @@ def path_to_timed_trajectory(
     minimum_duration = _minimum_duration(total_length, max_speed, max_acceleration)
     duration = max(float(dt), minimum_duration)
 
-    # Increase duration until finite-difference derivatives respect requested limits.
+    # 逐步延长总时间，直到有限差分得到的速度和加速度满足限制。
     for _ in range(8):
         time_values = _time_grid(duration, dt)
         duration = float(time_values[-1])

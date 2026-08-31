@@ -7,6 +7,7 @@ from pathlib import Path
 from standalone_maps.geometry import Building, SceneMap, render_scene, save_scene
 
 
+# ==================== 组合楼栋尺寸模板 ====================
 TEMPLATES = {
     "single": (23.0, 10.0),
     "double": (30.0, 12.0),
@@ -15,12 +16,14 @@ TEMPLATES = {
 }
 
 
+# ==================== 单排楼栋居中排布 ====================
 def _row(
     y: float,
     groups: tuple[tuple[str, str], ...],
     gap: float = 20.0,
     yaw_deg: float = 0.0,
 ) -> list[Building]:
+    # 先计算整排总长，再从地图中央向两侧留出相同边距。
     lengths = [TEMPLATES[kind][0] for _, kind in groups]
     total = sum(lengths) + gap * (len(groups) - 1)
     cursor = (520.0 - total) / 2.0
@@ -44,6 +47,7 @@ def _row(
     return result
 
 
+# ==================== 三明花园完整场景组装 ====================
 def build_scene() -> SceneMap:
     buildings: list[Building] = []
     buildings.extend(
@@ -111,10 +115,12 @@ def build_scene() -> SceneMap:
     )
 
 
+# 模块导入时构建一次场景，供训练和测试共同使用。
 SCENE = build_scene()
 
 
 if __name__ == "__main__":
+    # 单独运行时只导出地图数据和预览图。
     output = Path("outputs/standalone_maps")
     save_scene(SCENE, output)
     render_scene(SCENE, output / f"{SCENE.slug}.png")

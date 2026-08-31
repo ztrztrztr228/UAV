@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 
 
+# ==================== DQN 函数逼近器 ====================
 class QNetwork(nn.Module):
     """DQN 的 Q 值网络。
 
@@ -16,6 +17,7 @@ class QNetwork(nn.Module):
 
     def __init__(self, state_dim: int, action_dim: int, hidden_size: int = 256) -> None:
         super().__init__()
+        # 三个隐藏层提取状态特征，LayerNorm 用于减小不同状态量纲带来的训练波动。
         self.net = nn.Sequential(
             nn.Linear(state_dim, hidden_size),
             nn.ReLU(),
@@ -30,4 +32,5 @@ class QNetwork(nn.Module):
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
         """前向传播，返回所有动作的 Q 值。"""
+        # 最后一维的每个值分别对应 actions.py 中的一个离散动作。
         return self.net(state)

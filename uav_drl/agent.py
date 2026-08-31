@@ -3,7 +3,12 @@
 
 from __future__ import annotations
 
+import errno
+import os
 import random
+import time
+import uuid
+import warnings
 from collections import deque
 from pathlib import Path
 
@@ -17,6 +22,40 @@ from .config import UAVEnvConfig, config_to_dict
 from .model import QNetwork
 
 
+# ==================== Checkpoint 原子保存辅助配置 ====================
+_CHECKPOINT_REPLACE_RETRY_DELAYS = (0.0, 0.25, 0.5, 1.0, 2.0)
+_TRANSIENT_CHECKPOINT_ERROR_CODES = {
+    errno.EACCES,
+    errno.EBUSY,
+    5,     # Windows ERROR_ACCESS_DENIED
+    32,    # Windows ERROR_SHARING_VIOLATION
+    1224,  # Windows ERROR_USER_MAPPED_FILE
+}
+
+
+def _is_transient_checkpoint_error(exc: OSError) -> bool:
+    codes = {exc.errno, getattr(exc, "winerror", None)}
+    return bool(codes & _TRANSIENT_CHECKPOINT_ERROR_CODES)
+
+
+def _atomic_replace_checkpoint(source: Path, target: Path) -> None:
+    """Replace a checkpoint, retrying transient Windows scanner/file-map locks."""
+    last_error: OSError | None = None
+    for delay in _CHECKPOINT_REPLACE_RETRY_DELAYS:
+        if delay:
+            time.sleep(delay)
+        try:
+            os.replace(source, target)
+            return
+        except OSError as exc:
+            if not _is_transient_checkpoint_error(exc):
+                raise
+            last_error = exc
+    assert last_error is not None
+    raise last_error
+
+
+# ==================== PyTorch 计算设备选择 ====================
 def resolve_device(device: str | None = None) -> torch.device:
     """Resolve an explicit or automatic compute device with a clear CUDA error."""
     requested = (device or "cpu").strip().lower()
@@ -54,6 +93,7 @@ def device_description(device: torch.device) -> str:
     return f"{device} (PyTorch {torch.__version__})"
 
 
+# ==================== 经验回放池 ====================
 class ReplayBuffer:
     """经验回放池。
 
@@ -84,7 +124,7 @@ class ReplayBuffer:
         }
 
     def load_state_dict(self, state: dict[str, object]) -> None:
-   #从上次重新加载经验池
+        # 从 checkpoint 恢复经验；同时兼容旧版五字段 transition。
         capacity = int(state.get("capacity") or self.buffer.maxlen or 0)
         items = state.get("items", [])
         migrated_items = []
@@ -109,6 +149,7 @@ class ReplayBuffer:
         self.buffer = deque(migrated_items, maxlen=capacity)
 
     def _migrate_state(self, state: np.ndarray) -> np.ndarray:
+        # 旧状态缺少末尾新增特征时补零，确保能继续训练 50 维网络。
         array = np.asarray(state, dtype=np.float32).reshape(-1)
         if len(array) > self.state_dim:
             raise ValueError(
@@ -119,6 +160,7 @@ class ReplayBuffer:
         return array.astype(np.float32, copy=False)
 
     def _migrate_action_mask(self, action_mask: np.ndarray) -> np.ndarray:
+        # 旧经验没有可靠掩码时退化为“所有动作可选”。
         array = np.asarray(action_mask, dtype=bool).reshape(-1)
         if len(array) != self.action_dim:
             return np.ones(self.action_dim, dtype=bool)
@@ -127,7 +169,7 @@ class ReplayBuffer:
         return array
 
     def push(
-        self,#存入经验
+        self,
         state: np.ndarray,
         action: int,
         reward: float,
@@ -136,6 +178,7 @@ class ReplayBuffer:
         next_action_mask: np.ndarray | None = None,
     ) -> None:
         """保存一条交互经验。"""
+        # 经验除标准五元组外，还保存下一状态动作掩码供 Double DQN 计算目标值。
         mask = (
             np.ones(self.action_dim, dtype=bool)
             if next_action_mask is None
@@ -153,7 +196,7 @@ class ReplayBuffer:
         )
 
     def sample(
-        self,#取出经验
+        self,
         batch_size: int,
         device: torch.device,
     ) -> tuple[
@@ -165,6 +208,7 @@ class ReplayBuffer:
         torch.Tensor,
     ]:
         """随机采样一个 batch，并转换为 tensor。"""
+        # Python 随机采样后一次堆叠，统一搬运到训练设备。
         batch = random.sample(self.buffer, batch_size)
         states, actions, rewards, next_states, dones, next_action_masks = zip(*batch)
         state_tensor = torch.as_tensor(np.stack(states), dtype=torch.float32, device=device)
@@ -185,6 +229,7 @@ class ReplayBuffer:
         )
 
 
+# ==================== Double DQN 智能体 ====================
 class DQNAgent:
     """DQN 智能体。
 
@@ -217,8 +262,9 @@ class DQNAgent:
         self.batch_size = batch_size
         self.grad_clip = grad_clip
 
-        self.policy_net = QNetwork(state_dim, action_dim, hidden_size).to(self.device)##创建Q网络
-        self.target_net = QNetwork(state_dim, action_dim, hidden_size).to(self.device)##创建目标网络
+        # 在线网络负责选动作和学习，目标网络负责生成较稳定的监督目标。
+        self.policy_net = QNetwork(state_dim, action_dim, hidden_size).to(self.device)
+        self.target_net = QNetwork(state_dim, action_dim, hidden_size).to(self.device)
         self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=lr)
         self.replay_buffer = ReplayBuffer(buffer_size, state_dim=state_dim, action_dim=action_dim)
         self.update_target_network()
@@ -233,6 +279,7 @@ class DQNAgent:
 
         训练时以 epsilon 概率随机探索；评估时 epsilon=0，选择 Q 值最大动作。
         """
+        # 先把安全掩码转成合法动作集合，随机探索和贪心策略共用这一集合。
         valid_mask = (
             np.ones(self.action_dim, dtype=bool)
             if action_mask is None
@@ -249,11 +296,12 @@ class DQNAgent:
             return int(random.choice(valid_actions.tolist()))
         self.policy_net.eval()
         with torch.no_grad():
-            state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)#计算状态向量
-            q_values = self.policy_net(state_tensor)#输入状态向量给policy network，得到各动作价值
+            # 网络输出全部动作价值，无效动作设为负无穷后再取最大值。
+            state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+            q_values = self.policy_net(state_tensor)
             mask_tensor = torch.as_tensor(valid_mask, dtype=torch.bool, device=self.device).unsqueeze(0)
             q_values = q_values.masked_fill(~mask_tensor, -torch.inf)
-            return int(q_values.argmax(dim=1).item())#选择该状态下价值最大的动作，此即策略
+            return int(q_values.argmax(dim=1).item())
 
     def learn(self) -> float | None:
         """从经验回放池采batch size个样本并用他们更新一次 Q 网络。"""
@@ -261,30 +309,32 @@ class DQNAgent:
             return None
 
         self.policy_net.train()
+        # 从回放池抽取无时间相关性的随机 batch。
         states, actions, rewards, next_states, dones, next_action_masks = self.replay_buffer.sample(
-            self.batch_size,#从经验池取样
+            self.batch_size,
             self.device,
         )
 
         # 当前动作价值 Q(s,a)。
         q_values = self.policy_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
 
-        with torch.no_grad():#计算target
+        with torch.no_grad():
             # Double DQN 目标：在线网络选动作，目标网络估值。
             next_policy_values = self.policy_net(next_states).masked_fill(
                 ~next_action_masks,
                 -torch.inf,
             )
             next_actions = next_policy_values.argmax(dim=1, keepdim=True)
-            next_q_values = self.target_net(next_states).gather(1, next_actions).squeeze(1)#估计下一步最佳动作价值
+            next_q_values = self.target_net(next_states).gather(1, next_actions).squeeze(1)
             targets = rewards + self.gamma * (1.0 - dones) * next_q_values
 
-        loss = F.smooth_l1_loss(q_values, targets)#计算损失函数
+        # Huber loss 抑制异常 TD 误差，再通过梯度裁剪限制一次更新幅度。
+        loss = F.smooth_l1_loss(q_values, targets)
         self.optimizer.zero_grad()
-        loss.backward()#计算梯度下降
+        loss.backward()
         nn.utils.clip_grad_norm_(self.policy_net.parameters(), self.grad_clip)
-        self.optimizer.step()#更新网络
-        return float(loss.detach().cpu().item())##返回loss值
+        self.optimizer.step()
+        return float(loss.detach().cpu().item())
 
     def update_target_network(self) -> None:
         """同步目标网络参数。"""
@@ -295,8 +345,11 @@ class DQNAgent:
         path: str | Path,
         config: UAVEnvConfig | None = None,
         extra_state: dict[str, object] | None = None,
-    ) -> None:
-        """保存模型和环境配置。"""
+    ) -> Path:
+        """Safely save a checkpoint without truncating the current good file."""
+        target_path = Path(path)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        # checkpoint 同时保存网络、优化器、经验池、环境配置和续训进度。
         payload = {
             "policy_net": self.policy_net.state_dict(),
             "target_net": self.target_net.state_dict(),
@@ -311,7 +364,34 @@ class DQNAgent:
         }
         if extra_state:
             payload.update(extra_state)
-        torch.save(payload, path)
+        temporary_path = target_path.with_name(
+            f".{target_path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        )
+        try:
+            # Serialize to a new file first. The existing checkpoint remains intact
+            # even if PyTorch, Defender, an indexer, or Windows interrupts this step.
+            torch.save(payload, temporary_path)
+            try:
+                _atomic_replace_checkpoint(temporary_path, target_path)
+                return target_path
+            except OSError as exc:
+                if not _is_transient_checkpoint_error(exc):
+                    raise
+                recovery_path = target_path.with_name(
+                    f"{target_path.stem}_recovery_{time.strftime('%Y%m%d_%H%M%S')}_"
+                    f"{uuid.uuid4().hex[:8]}{target_path.suffix}"
+                )
+                os.replace(temporary_path, recovery_path)
+                warnings.warn(
+                    f"Checkpoint {target_path} stayed locked after retries; the same "
+                    f"training state was preserved at {recovery_path}. Training will continue.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                return recovery_path
+        finally:
+            # A failed serialization must not leave large temporary files behind.
+            temporary_path.unlink(missing_ok=True)
 
     def _load_network_with_appended_state_features(
         self,
@@ -319,6 +399,7 @@ class DQNAgent:
         loaded_state: dict[str, torch.Tensor],
     ) -> bool:
         """Load a network, zero-initializing columns for newly appended state features."""
+        # 仅允许第一层输入列变多；新增列权重置零，其余参数必须完全匹配。
         current_state = network.state_dict()
         migrated = False
         compatible_state: dict[str, torch.Tensor] = {}
@@ -354,8 +435,14 @@ class DQNAgent:
         discard_replay_on_state_migration: bool = False,
     ) -> dict[str, object]:
         """加载已训练模型。"""
+        # mmap=False 可避免 Windows 对 checkpoint 建立长期文件映射而阻塞后续覆盖。
         try:
-            checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+            checkpoint = torch.load(
+                path,
+                map_location=self.device,
+                weights_only=False,
+                mmap=False,
+            )
         except TypeError:
             checkpoint = torch.load(path, map_location=self.device)
         checkpoint_state_dim = int(checkpoint.get("state_dim", self.state_dim))
@@ -365,6 +452,7 @@ class DQNAgent:
             )
         if int(checkpoint.get("action_dim", self.action_dim)) != self.action_dim:
             raise ValueError("Checkpoint action dimension does not match the environment.")
+        # 分别迁移在线网络和目标网络，必要时按设置丢弃不可靠的旧经验池。
         try:
             migrated_policy = self._load_network_with_appended_state_features(
                 self.policy_net,

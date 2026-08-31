@@ -13,6 +13,7 @@ from .config import DEFAULT_SEED, UAVEnvConfig
 from .trajectory import TimedTrajectory, dynamics_samples_to_trajectory
 
 
+# ==================== 三维强化学习环境 ====================
 class UAVPathPlanningEnv:
     """使用点质量模型的三维轨迹规划环境。
 
@@ -23,6 +24,7 @@ class UAVPathPlanningEnv:
     """
 
     def __init__(self, config: UAVEnvConfig | None = None, seed: int = DEFAULT_SEED) -> None:
+        # 读取并校验环境参数，同时确定动作数、状态维度和地图归一化尺度。
         self.config = config or UAVEnvConfig()
         self._validate_config()
         self.rng = np.random.default_rng(seed)
@@ -40,6 +42,8 @@ class UAVPathPlanningEnv:
         )
         self.map_max = self.map_min + self.map_size
         self.max_distance = float(np.linalg.norm(self.map_size))
+
+        # 把障碍物边界预先整理成数组，供雷达和碰撞检测批量计算。
         self._obstacle_mins = np.asarray(
             [[item.xmin, item.ymin, item.zmin] for item in self.config.obstacles],
             dtype=np.float32,
@@ -50,6 +54,7 @@ class UAVPathPlanningEnv:
         ).reshape(-1, 3)
         self._last_lidar_scan = np.ones(self.lidar_dim, dtype=np.float32)
 
+        # 保存当前 episode 的动力学状态、任务状态和完整轨迹历史。
         self.position = np.zeros(3, dtype=np.float32)
         self.velocity = np.zeros(3, dtype=np.float32)
         self.acceleration = np.zeros(3, dtype=np.float32)
@@ -67,6 +72,7 @@ class UAVPathPlanningEnv:
         self.last_reward_diagnostics: dict[str, float] = {}
         self.reset()
 
+    # ==================== 参数合法性检查 ====================
     def _validate_config(self) -> None:
         for name in ("map_width", "map_height", "map_altitude"):
             if float(getattr(self.config, name)) <= 2.0 * self.config.uav_radius:
@@ -122,6 +128,7 @@ class UAVPathPlanningEnv:
         goal_altitude_max: float | None = None,
         goal_near_obstacle_horizontal_only: bool = False,
     ) -> np.ndarray:
+        # 先检查课程学习传入的概率、净空、距离和高度范围。
         if not 0.0 <= goal_near_obstacle_probability <= 1.0:
             raise ValueError("goal_near_obstacle_probability must be in [0, 1].")
         if goal_near_obstacle_min_clearance < 0.0:
@@ -155,6 +162,8 @@ class UAVPathPlanningEnv:
             )
         if seed is not None:
             self.rng = np.random.default_rng(seed)
+
+        # 起点可由用户指定或随机生成；目标按“指定、建筑附近、均匀”优先级采样。
         self.start = self._sample_free_point() if start is None else self._validate_free_point(start, "start")
         if goal is not None:
             self.goal = self._validate_free_point(goal, "goal")
@@ -189,6 +198,8 @@ class UAVPathPlanningEnv:
             )
             self.goal_sampling_mode = "uniform"
         self.goal_obstacle_clearance = self._nearest_obstacle_clearance(self.goal)
+
+        # 每个 episode 都从静止状态重新开始，并清空累计统计和轨迹缓存。
         self.position = self.start.copy()
         self.velocity = np.zeros(3, dtype=np.float32)
         self.acceleration = np.zeros(3, dtype=np.float32)
@@ -202,6 +213,7 @@ class UAVPathPlanningEnv:
         self.last_reward_diagnostics = {}
         return self._get_state()
 
+    # ==================== 单步环境交互 ====================
     def step(self, action: int) -> tuple[np.ndarray, float, bool, dict[str, object]]:
         if self.done:
             return self._get_state(), 0.0, True, self._info("already_done")
@@ -222,6 +234,7 @@ class UAVPathPlanningEnv:
         ) = self._predict_action_dynamics(action)
         dt = self.config.trajectory_dt
 
+        # 沿本步真实抛物线轨迹检查碰撞；碰撞时不提交候选状态，直接终止回合。
         self.steps += 1
         if self._dynamics_segment_in_collision(
             previous_position,
@@ -246,6 +259,7 @@ class UAVPathPlanningEnv:
                 speed_clipped=clipped_velocity > 1e-9,
             )
 
+        # 安全时提交新的位置、速度和加速度，并累计路径长度和时序样本。
         self.position = candidate.astype(np.float32)
         self.velocity = next_velocity.astype(np.float32)
         self.acceleration = effective_acceleration.astype(np.float32)
@@ -269,6 +283,8 @@ class UAVPathPlanningEnv:
         speed = float(np.linalg.norm(self.velocity))
         reached_goal = distance <= self.config.goal_radius and speed <= self.config.goal_speed_tolerance
         timeout = self.steps >= self.config.max_steps
+
+        # 到达目标还要求末速度足够低；否则按最大步数判断超时。
         event = "running"
         if reached_goal:
             self.done = True
@@ -293,6 +309,7 @@ class UAVPathPlanningEnv:
             speed_clipped=clipped_velocity > 1e-9,
         )
 
+    # ==================== 动力学预测与约束 ====================
     def _predict_action_dynamics(
         self,
         action: int,
@@ -302,6 +319,7 @@ class UAVPathPlanningEnv:
         if not 0 <= action < self.num_actions:
             raise ValueError(f"Action must be in [0, {self.num_actions - 1}], got {action}.")
 
+        # 先将离散动作变成加速度命令，再依次施加加速度、jerk 和速度约束。
         dt = self.config.trajectory_dt
         commanded_acceleration = self._limit_commanded_acceleration(
             ACTION_DIRECTIONS[action] * self.config.normal_acceleration,
@@ -319,6 +337,7 @@ class UAVPathPlanningEnv:
         next_velocity = self._limit_velocity(unconstrained_velocity)
         clipped_velocity = float(np.linalg.norm(unconstrained_velocity - next_velocity))
         effective_acceleration = (next_velocity - self.velocity) / dt
+        # 使用梯形积分更新位置，使位置与前后时刻速度保持一致。
         candidate = self.position + 0.5 * (self.velocity + next_velocity) * dt
         return (
             commanded_acceleration.astype(np.float32),
@@ -344,6 +363,7 @@ class UAVPathPlanningEnv:
 
     def _limit_velocity(self, velocity: np.ndarray) -> np.ndarray:
         """Project velocity onto horizontal, vertical, climb-angle, and 3D limits."""
+        # 约束顺序为水平速度、升降速度、爬升角，最后再限制三维合速度。
         limited = np.asarray(velocity, dtype=np.float64).copy()
         horizontal_speed = float(np.linalg.norm(limited[:2]))
         if horizontal_speed > self.config.max_horizontal_speed:
@@ -378,6 +398,7 @@ class UAVPathPlanningEnv:
     def distance_to_goal(self) -> float:
         return float(np.linalg.norm(self.goal - self.position))
 
+    # ==================== 航路高度与末端引导 ====================
     def _reference_route_altitude(self, position: np.ndarray) -> float:
         """Return linearly interpolated start-to-goal altitude at the current XY projection."""
         horizontal_route = self.goal[:2] - self.start[:2]
@@ -426,6 +447,7 @@ class UAVPathPlanningEnv:
         vertical_speed_error_ratio = abs(float(self.velocity[2]) - desired_vertical_speed) / vertical_speed_scale
         return approach_weight, altitude_error, desired_vertical_speed, vertical_speed_error_ratio
 
+    # ==================== 奖励函数 ====================
     def _shaped_reward(
         self,
         action: int,
@@ -436,6 +458,7 @@ class UAVPathPlanningEnv:
         segment_length: float,
         clipped_speed: float,
     ) -> float:
+        # 基础项鼓励接近目标，并持续施加距离和时间成本。
         components: dict[str, float] = {
             "progress": float(self.config.progress_reward_scale * progress),
             "distance": float(-self.config.distance_penalty_scale * distance / self.max_distance),
@@ -457,6 +480,7 @@ class UAVPathPlanningEnv:
             -self.config.speed_clip_penalty_scale * clipped_speed / self.config.max_speed
         )
 
+        # 轨迹形状项抑制无效绕行和高速急转弯。
         useful_progress = max(0.0, progress)
         detour_distance = max(0.0, segment_length - useful_progress)
         components["detour"] = float(-self.config.detour_penalty_scale * detour_distance)
@@ -470,6 +494,7 @@ class UAVPathPlanningEnv:
             turn_angle_ratio = math.acos(heading_cosine) / math.pi
         components["turn"] = float(-self.config.turn_penalty_scale * turn_angle_ratio)
 
+        # 速度方向越接近目标方向，获得的对齐奖励越高。
         delta = self.goal - self.position
         if speed > 1e-6 and np.linalg.norm(delta) > 1e-6:
             alignment = float(np.dot(self.velocity / speed, delta / np.linalg.norm(delta)))
@@ -481,6 +506,7 @@ class UAVPathPlanningEnv:
         if action == COAST_ACTION_INDEX and speed < 1e-3:
             components["hover"] = float(-self.config.hover_penalty)
 
+        # 安全项同时考虑当前净空和按当前速度计算的制动距离。
         clearance = self._nearest_clearance(self.position)
         if clearance < self.config.safety_radius:
             unsafe_ratio = (self.config.safety_radius - clearance) / self.config.safety_radius
@@ -490,6 +516,7 @@ class UAVPathPlanningEnv:
             risk = min(2.0, (stopping_distance - clearance) / self.config.safety_radius)
             components["braking_risk"] = float(-self.config.braking_risk_penalty_scale * risk)
 
+        # 高度项允许必要的越障高度，但惩罚超过参考高度走廊的额外爬升。
         altitude_ratio = self.position[2] / self.config.map_altitude
         components["absolute_altitude"] = float(-self.config.altitude_penalty_scale * altitude_ratio)
         allowed_altitude = self._allowed_route_altitude(self.position)
@@ -498,6 +525,7 @@ class UAVPathPlanningEnv:
             -self.config.extra_altitude_penalty_scale * extra_altitude
         )
 
+        # 越接近目标，越强调目标高度和垂直速度跟踪。
         approach_weight, altitude_error, desired_vz, vertical_speed_error_ratio = self._goal_guidance_terms()
         components["goal_altitude"] = float(
             -self.config.goal_altitude_penalty_scale * approach_weight * abs(altitude_error)
@@ -520,6 +548,7 @@ class UAVPathPlanningEnv:
         }
         return float(reward)
 
+    # ==================== 50 维状态构造 ====================
     def _get_state(self) -> np.ndarray:
         delta = self.goal - self.position
         distance = float(np.linalg.norm(delta))
@@ -533,6 +562,7 @@ class UAVPathPlanningEnv:
         lidar_scan = self._lidar_scan()
         self._last_lidar_scan = lidar_scan.copy()
         early_braking_state = self._early_braking_state(lidar_scan, stopping_distance)
+        # 拼接顺序固定；旧 checkpoint 迁移依赖新增制动特征位于末尾。
         state = np.concatenate(
             [
                 (self.position - self.map_min) / self.map_size,
@@ -592,6 +622,7 @@ class UAVPathPlanningEnv:
             dtype=np.float32,
         )
 
+    # ==================== 安全动作屏蔽 ====================
     def safe_action_mask(
         self,
         safety_buffer: float = 0.5,
@@ -623,6 +654,7 @@ class UAVPathPlanningEnv:
         predicted_margins = np.full(self.num_actions, -float("inf"), dtype=np.float64)
         non_collision = np.zeros(self.num_actions, dtype=bool)
 
+        # 对每个动作复用真实动力学预测，排除立即碰撞或使制动裕度继续恶化的动作。
         for action in range(self.num_actions):
             _, next_velocity, effective_acceleration, candidate, _ = self._predict_action_dynamics(action)
             collides = self._dynamics_segment_in_collision(
@@ -655,6 +687,7 @@ class UAVPathPlanningEnv:
                 or predicted_margin >= current_margin - worsening_tolerance
             )
 
+        # 极端情况下至少保留一个相对最安全的动作，避免策略无法选择动作。
         if not np.any(mask):
             candidates = np.flatnonzero(non_collision)
             if len(candidates):
@@ -664,6 +697,7 @@ class UAVPathPlanningEnv:
             mask[best_action] = True
         return mask
 
+    # ==================== 26 方向雷达 ====================
     def _lidar_scan(self) -> np.ndarray:
         readings: list[float] = []
         for direction in ACTION_DIRECTIONS[:-1]:
@@ -682,6 +716,7 @@ class UAVPathPlanningEnv:
             readings.append(distance / self.config.lidar_range)
         return np.asarray(readings, dtype=np.float32)
 
+    # ==================== 起点与目标采样 ====================
     def _sample_goal_far_from(
         self,
         start: np.ndarray,
@@ -750,6 +785,7 @@ class UAVPathPlanningEnv:
             raise ValueError(f"{name} point {array.tolist()} is outside the map or inside an obstacle.")
         return array
 
+    # ==================== 连续轨迹碰撞检测 ====================
     def _segment_in_collision(self, start: np.ndarray, end: np.ndarray) -> bool:
         length = float(np.linalg.norm(end - start))
         count = max(2, int(math.ceil(length / self.config.collision_resolution)) + 1)
@@ -798,6 +834,7 @@ class UAVPathPlanningEnv:
             collisions |= np.any(inside_obstacle, axis=1)
         return collisions
 
+    # ==================== 障碍物和边界净空 ====================
     def _nearest_clearance(self, point: np.ndarray) -> float:
         boundary_clearance = float(min(np.min(point - self.map_min), np.min(self.map_max - point)))
         obstacle_clearance = self._nearest_obstacle_distance(point)
@@ -827,6 +864,7 @@ class UAVPathPlanningEnv:
         deltas = below + above
         return float(np.min(np.linalg.norm(deltas, axis=1)))
 
+    # ==================== 调试与评估信息汇总 ====================
     def _info(
         self,
         event: str,

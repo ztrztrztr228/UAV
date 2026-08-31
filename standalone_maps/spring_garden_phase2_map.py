@@ -7,6 +7,7 @@ from pathlib import Path
 from standalone_maps.geometry import Building, SceneMap, render_scene, save_scene
 
 
+# ==================== 连排高层尺寸模板 ====================
 STRIP_TYPES = {
     "long": (73.0, 13.0),
     "long_wide": (71.0, 15.0),
@@ -15,12 +16,14 @@ STRIP_TYPES = {
 }
 
 
+# ==================== 单排高层条带生成 ====================
 def _strip_row(
     y: float,
     groups: tuple[tuple[str, str], ...],
     gap: float,
     yaw_deg: float,
 ) -> list[Building]:
+    # 按模板计算各组合楼栋尺寸，并让整排在 520 m 地图宽度内居中。
     lengths = [STRIP_TYPES[kind][0] for _, kind in groups]
     total = sum(lengths) + gap * (len(groups) - 1)
     cursor = (520.0 - total) / 2.0
@@ -44,6 +47,7 @@ def _strip_row(
     return result
 
 
+# ==================== 春天花园二期完整场景组装 ====================
 def build_scene() -> SceneMap:
     buildings: list[Building] = []
     buildings.extend(_strip_row(315.0, (("73", "long"), ("76", "long_wide"), ("71", "short")), 44.0, -3.0))
@@ -95,10 +99,12 @@ def build_scene() -> SceneMap:
     )
 
 
+# 模块导入时构建一次场景，供训练适配器直接读取。
 SCENE = build_scene()
 
 
 if __name__ == "__main__":
+    # 单独运行时只导出地图数据和预览图。
     output = Path("outputs/standalone_maps")
     save_scene(SCENE, output)
     render_scene(SCENE, output / f"{SCENE.slug}.png")

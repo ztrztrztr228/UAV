@@ -6,6 +6,7 @@ from __future__ import annotations
 import numpy as np
 
 
+# 将离散方向分量转换为便于日志和调试阅读的动作名称。
 def _direction_name(dx: int, dy: int, dz: int) -> str:
     """三维方向分量转换成可读动作名称。"""
     parts: list[str] = []
@@ -27,6 +28,7 @@ def _direction_name(dx: int, dy: int, dz: int) -> str:
     return "_".join(parts)
 
 
+# 枚举三维邻域，建立“动作名称—单位加速度方向”的固定映射。
 def _make_3d_action_space() -> tuple[tuple[str, ...], np.ndarray]:
     """生成 26 个三维加速度方向 + 1 个零加速度动作。
 
@@ -54,7 +56,7 @@ def _make_3d_action_space() -> tuple[tuple[str, ...], np.ndarray]:
     return tuple(names), np.asarray(directions, dtype=np.float32)
 
 
-# ACTION_NAMES[i] 与 ACTION_DIRECTIONS[i] 一一对应。
+# 对外暴露完整动作表；ACTION_NAMES[i] 与 ACTION_DIRECTIONS[i] 一一对应。
 ACTION_NAMES, ACTION_DIRECTIONS = _make_3d_action_space()
 
 # 最后一个动作固定为零加速度（惯性滑行）。保留旧名称作为兼容别名。

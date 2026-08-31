@@ -11,6 +11,7 @@ import torch
 from .config import DEFAULT_SEED
 
 
+# ==================== 实验可复现设置 ====================
 def fix_seed(seed: int = DEFAULT_SEED) -> None:
     """固定随机种子，尽量保证实验可复现。"""
     random.seed(seed)
@@ -23,6 +24,7 @@ def fix_seed(seed: int = DEFAULT_SEED) -> None:
     torch.backends.cudnn.deterministic = True
 
 
+# ==================== 命令行三维坐标解析 ====================
 def optional_point_3d(
     x: float | None,
     y: float | None,

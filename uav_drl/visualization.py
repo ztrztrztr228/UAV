@@ -16,6 +16,7 @@ from .trajectory import TimedTrajectory
 from .validation import TrajectoryValidationResult
 
 
+# ==================== 训练指标可视化 ====================
 def moving_average(values: Sequence[float], window: int) -> np.ndarray:
     """计算滑动平均，让训练曲线更平滑。"""
     if len(values) == 0:
@@ -74,6 +75,7 @@ def plot_training(history: TrainHistory, output_path: Path) -> None:
     print(f"Saved training plot to {output_path}")
 
 
+# ==================== 三维障碍物与轨迹可视化 ====================
 def _box_faces(obstacle: BoxObstacle) -> list[list[tuple[float, float, float]]]:
     """返回长方体的 6 个面，用于 matplotlib 3D 绘图。"""
     x0, y0, z0 = obstacle.xmin, obstacle.ymin, obstacle.zmin
@@ -162,6 +164,7 @@ def plot_trajectory(
     print(f"Saved trajectory plot to {output_path}")
 
 
+# ==================== 轨迹 CSV 导出 ====================
 def save_trajectory_csv(trajectory: Sequence[np.ndarray], output_path: Path) -> None:
     """把三维轨迹保存为 CSV。"""
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -221,6 +224,7 @@ def save_timed_trajectory_csv(trajectory: TimedTrajectory, output_path: Path) ->
     print(f"Saved timed trajectory csv to {output_path}")
 
 
+# ==================== 动力学曲线与验证图 ====================
 def plot_trajectory_profiles(trajectory: TimedTrajectory, output_path: Path) -> None:
     """Plot speed and acceleration over trajectory time."""
     try:

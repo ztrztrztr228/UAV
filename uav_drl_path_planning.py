@@ -57,24 +57,45 @@ from uav_drl.visualization import (
 )
 
 
+# ==================== 命令行参数定义与校验 ====================
 def parse_args() -> argparse.Namespace:
     """定义命令行参数。"""
     parser = argparse.ArgumentParser(description="Train a dynamics-aware 3D DQN UAV trajectory planner.")
+
+    # 运行模式、评估目标分布、随机种子和场景选择。
     parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument("--eval-episodes", type=int, default=5)
     parser.add_argument(
+        "--eval-goal-mode",
+        choices=("match-training", "hard", "stress"),
+        default="match-training",
+        help=(
+            "evaluation goal tier: standard training difficulty (default), the final "
+            "hard curriculum tier, or the legacy unrestricted stress distribution"
+        ),
+    )
+    parser.add_argument(
         "--eval-near-obstacle-probability",
         type=float,
-        default=0.70,
-        help="fraction of random evaluation goals sampled near buildings",
+        help="override the selected evaluation tier's near-building goal fraction",
     )
-    parser.add_argument("--eval-near-obstacle-min-clearance", type=float, default=2.0)
-    parser.add_argument("--eval-near-obstacle-max-clearance", type=float, default=12.0)
+    parser.add_argument("--eval-near-obstacle-min-clearance", type=float)
+    parser.add_argument("--eval-near-obstacle-max-clearance", type=float)
+    parser.add_argument("--eval-goal-max-distance", type=float)
+    parser.add_argument("--eval-goal-min-altitude", type=float)
+    parser.add_argument("--eval-goal-max-altitude", type=float)
+    parser.add_argument(
+        "--eval-goal-side-clearance-only",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="override whether near-building evaluation goals use horizontal side clearance",
+    )
     parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--scene", choices=available_scene_keys(), default="wujing_airfield")
     parser.add_argument("--list-scenes", action="store_true")
 
+    # 地图范围、障碍物外扩以及无人机离散时间动力学约束。
     parser.add_argument("--map-x-min", type=float)
     parser.add_argument("--map-y-min", type=float)
     parser.add_argument("--map-width", type=float)
@@ -103,6 +124,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--raw-max-jerk", type=float, default=142.0, help="raw-log peak for reference")
     parser.add_argument("--goal-speed-tolerance", type=float, default=1.0)
     parser.add_argument("--smoothing-iterations", type=int, default=1)
+
+    # 轨迹形状奖励和导出轨迹与参考路径间的允许偏差。
     reward_group = parser.add_argument_group("trajectory reward shaping")
     reward_group.add_argument("--extra-altitude-penalty-scale", type=float, default=0.12)
     reward_group.add_argument("--extra-altitude-margin", type=float, default=3.0)
@@ -120,6 +143,7 @@ def parse_args() -> argparse.Namespace:
         help="maximum allowed distance from timed trajectory samples to the original path",
     )
 
+    # 用户可选的固定三维起点和目标点；留空时由环境采样。
     parser.add_argument("--start-x", type=float)
     parser.add_argument("--start-y", type=float)
     parser.add_argument("--start-z", type=float)
@@ -127,6 +151,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-y", type=float)
     parser.add_argument("--target-z", type=float)
 
+    # DQN 超参数、目标课程学习、安全动作屏蔽和周期验证设置。
     parser.add_argument("--hidden-size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--gamma", type=float, default=0.99)
@@ -148,12 +173,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-near-obstacle-start-min-clearance", type=float)
     parser.add_argument("--train-near-obstacle-start-max-clearance", type=float)
     parser.add_argument("--train-near-obstacle-curriculum-episodes", type=int)
+    parser.add_argument("--train-near-obstacle-hard-probability", type=float)
+    parser.add_argument("--train-near-obstacle-hard-min-clearance", type=float)
+    parser.add_argument("--train-near-obstacle-hard-max-clearance", type=float)
+    parser.add_argument("--train-near-obstacle-hardening-episodes", type=int)
     parser.add_argument("--train-goal-start-max-distance", type=float)
     parser.add_argument("--train-goal-final-max-distance", type=float)
+    parser.add_argument("--train-goal-hard-max-distance", type=float)
     parser.add_argument("--train-goal-start-min-altitude", type=float)
     parser.add_argument("--train-goal-start-max-altitude", type=float)
     parser.add_argument("--train-goal-final-min-altitude", type=float)
     parser.add_argument("--train-goal-final-max-altitude", type=float)
+    parser.add_argument("--train-goal-hard-min-altitude", type=float)
+    parser.add_argument("--train-goal-hard-max-altitude", type=float)
     parser.add_argument(
         "--train-goal-side-clearance-only",
         action=argparse.BooleanOptionalAction,
@@ -180,6 +212,7 @@ def parse_args() -> argparse.Namespace:
         help="keep old replay when appending state features (not recommended)",
     )
 
+    # 输出目录、模型加载/保存、绘图和计算设备。
     parser.add_argument("--output-root", type=Path, default=Path("outputs"))
     parser.add_argument("--output-dir", type=Path, help="override this scene's run-results directory")
     parser.add_argument("--save-model", type=Path, help="override this scene's checkpoint path")
@@ -194,6 +227,7 @@ def parse_args() -> argparse.Namespace:
         help="compute device: cpu (default), auto, cuda, or cuda:<index>",
     )
 
+    # 只有显式启用时才使用的 QGroundControl 任务导出参数。
     qgc = parser.add_argument_group("QGroundControl Plan export")
     qgc.add_argument(
         "--export-qgc-plan",
@@ -218,12 +252,23 @@ def parse_args() -> argparse.Namespace:
     qgc.add_argument("--qgc-cruise-speed", type=float, default=15.0)
     qgc.add_argument("--qgc-end-action", choices=("none", "rtl", "land"), default="none")
 
+    # 解析后统一检查跨参数约束，避免训练启动后才暴露配置错误。
     args = parser.parse_args()
-    if not 0.0 <= args.eval_near_obstacle_probability <= 1.0:
+    if (
+        args.eval_near_obstacle_probability is not None
+        and not 0.0 <= args.eval_near_obstacle_probability <= 1.0
+    ):
         parser.error("--eval-near-obstacle-probability must be in [0, 1]")
-    if args.eval_near_obstacle_min_clearance < 0.0:
+    if (
+        args.eval_near_obstacle_min_clearance is not None
+        and args.eval_near_obstacle_min_clearance < 0.0
+    ):
         parser.error("--eval-near-obstacle-min-clearance must be non-negative")
-    if args.eval_near_obstacle_max_clearance < args.eval_near_obstacle_min_clearance:
+    if (
+        args.eval_near_obstacle_max_clearance is not None
+        and args.eval_near_obstacle_min_clearance is not None
+        and args.eval_near_obstacle_max_clearance < args.eval_near_obstacle_min_clearance
+    ):
         parser.error("--eval-near-obstacle-max-clearance must not be below the minimum")
     if args.train_near_obstacle_probability is not None and not 0.0 <= args.train_near_obstacle_probability <= 1.0:
         parser.error("--train-near-obstacle-probability must be in [0, 1]")
@@ -303,6 +348,7 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+# ==================== 环境配置组装 ====================
 def make_config(args: argparse.Namespace) -> UAVEnvConfig:
     """根据命令行参数生成三维环境配置。"""
     scene = get_training_scene(args.scene)
@@ -341,6 +387,7 @@ def make_config(args: argparse.Namespace) -> UAVEnvConfig:
     )
 
 
+# ==================== 运行目录和随机状态管理 ====================
 def make_run_output_dir(base_dir: Path) -> Path:
   #每次单独保存输出结果
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -386,6 +433,7 @@ def restore_rng_state(state: dict[str, object] | None) -> None:
         torch.cuda.set_rng_state_all(cuda_states)
 
 
+# ==================== QGroundControl 导出编排 ====================
 def _mission_polyline_is_collision_free(env: UAVPathPlanningEnv, points: np.ndarray) -> bool:
     """Check the straight segments that the autopilot will fly between QGC items."""
     return all(
@@ -402,10 +450,12 @@ def export_qgc_outputs(
     run_output_dir: Path,
 ) -> list[Path]:
     """Export a validated trajectory to the run directory and optional QGC AutoLoad path."""
+    # 未通过完整轨迹验证时禁止生成可被地面站加载的任务文件。
     if not validation.passed:
         print("Skipped QGC Plan export because trajectory validation did not pass.")
         return []
 
+    # 提取空中段并抽稀，减少飞控需要执行的航点数量。
     takeoff_point, waypoints = prepare_qgc_waypoints(
         trajectory.position,
         takeoff_altitude_m=args.qgc_takeoff_altitude,
@@ -421,6 +471,7 @@ def export_qgc_outputs(
             points = np.vstack([points, landing_point])
         return points
 
+    # QGC 会在相邻任务点间直线飞行，因此必须对抽稀后的折线重新检查碰撞。
     mission_polyline = mission_polyline_points()
     if not _mission_polyline_is_collision_free(env, mission_polyline):
         print("Simplified QGC path was not collision-free; retrying without geometric tolerance.")
@@ -436,6 +487,7 @@ def export_qgc_outputs(
                 "QGC mission export refused: straight waypoint segments intersect an obstacle or map boundary."
             )
 
+    # 将本地 ENU 航点转换为 WGS-84，并组装 QGC Plan JSON。
     plan = build_qgc_plan(
         home_point_enu=trajectory.position[0],
         takeoff_point_enu=takeoff_point,
@@ -450,6 +502,7 @@ def export_qgc_outputs(
         end_action=args.qgc_end_action,
     )
 
+    # 始终保存运行目录副本；提供 AutoLoad 目录时再同步一份给 QGC。
     output_paths = [save_qgc_plan(plan, run_output_dir / "qgc_mission.plan")]
     print(
         f"Saved QGC Plan to {output_paths[0]} "
@@ -462,6 +515,7 @@ def export_qgc_outputs(
     return output_paths
 
 
+# ==================== 分场景课程学习默认值 ====================
 def apply_scene_training_defaults(
     args: argparse.Namespace,
     scene_key: str,
@@ -477,6 +531,10 @@ def apply_scene_training_defaults(
         "train_near_obstacle_start_min_clearance": 15.0,
         "train_near_obstacle_start_max_clearance": 30.0,
         "train_near_obstacle_curriculum_episodes": 2_000 if residential else 1_500,
+        "train_near_obstacle_hard_probability": 0.70,
+        "train_near_obstacle_hard_min_clearance": 2.0,
+        "train_near_obstacle_hard_max_clearance": 12.0,
+        "train_near_obstacle_hardening_episodes": 2_000 if residential else 0,
     }
     for name, value in defaults.items():
         if getattr(args, name) is None:
@@ -496,17 +554,20 @@ def apply_scene_training_defaults(
         "spring_garden_phase2": 200.0,
     }[scene_key]
     altitude_limits = {
-        "lanxianghu_villa": (5.0, 15.0, 5.0, 25.0),
-        "sanming_garden": (5.0, 15.0, 5.0, 25.0),
-        "spring_garden_phase2": (5.0, 20.0, 5.0, 40.0),
+        "lanxianghu_villa": (5.0, 15.0, 5.0, 25.0, 5.0, 28.0),
+        "sanming_garden": (5.0, 15.0, 5.0, 25.0, 5.0, 35.0),
+        "spring_garden_phase2": (5.0, 20.0, 5.0, 40.0, 5.0, 60.0),
     }[scene_key]
     curriculum_defaults = {
         "train_goal_start_max_distance": start_max_distance,
         "train_goal_final_max_distance": maximum_distance,
+        "train_goal_hard_max_distance": maximum_distance,
         "train_goal_start_min_altitude": altitude_limits[0],
         "train_goal_start_max_altitude": altitude_limits[1],
         "train_goal_final_min_altitude": altitude_limits[2],
         "train_goal_final_max_altitude": altitude_limits[3],
+        "train_goal_hard_min_altitude": altitude_limits[4],
+        "train_goal_hard_max_altitude": altitude_limits[5],
     }
     for name, value in curriculum_defaults.items():
         if getattr(args, name) is None:
@@ -523,13 +584,18 @@ def validate_scene_training_curriculum(
     probability_fields = (
         "train_near_obstacle_start_probability",
         "train_near_obstacle_probability",
+        "train_near_obstacle_hard_probability",
     )
     for name in probability_fields:
         value = float(getattr(args, name))
         if not 0.0 <= value <= 1.0:
             raise ValueError(f"--{name.replace('_', '-')} must be in [0, 1].")
 
-    for prefix in ("train_near_obstacle_start", "train_near_obstacle"):
+    for prefix in (
+        "train_near_obstacle_start",
+        "train_near_obstacle",
+        "train_near_obstacle_hard",
+    ):
         minimum = float(getattr(args, f"{prefix}_min_clearance"))
         maximum = float(getattr(args, f"{prefix}_max_clearance"))
         if minimum < 0.0 or maximum < minimum:
@@ -537,10 +603,13 @@ def validate_scene_training_curriculum(
 
     if int(args.train_near_obstacle_curriculum_episodes) < 0:
         raise ValueError("--train-near-obstacle-curriculum-episodes must be non-negative.")
+    if int(args.train_near_obstacle_hardening_episodes) < 0:
+        raise ValueError("--train-near-obstacle-hardening-episodes must be non-negative.")
 
     for value in (
         args.train_goal_start_max_distance,
         args.train_goal_final_max_distance,
+        args.train_goal_hard_max_distance,
     ):
         if value is not None and (
             not np.isfinite(value) or value < config.min_start_goal_distance
@@ -552,7 +621,7 @@ def validate_scene_training_curriculum(
 
     flyable_min = config.uav_radius
     flyable_max = config.map_altitude - config.uav_radius
-    for stage in ("start", "final"):
+    for stage in ("start", "final", "hard"):
         minimum = getattr(args, f"train_goal_{stage}_min_altitude")
         maximum = getattr(args, f"train_goal_{stage}_max_altitude")
         if minimum is None and maximum is None:
@@ -571,6 +640,91 @@ def validate_scene_training_curriculum(
             )
 
 
+# ==================== 评估目标分布解析 ====================
+def resolve_evaluation_goal_sampling(
+    args: argparse.Namespace,
+    config: UAVEnvConfig,
+) -> dict[str, object]:
+    """Resolve one complete, reproducible evaluation goal distribution."""
+    if args.eval_goal_mode == "match-training":
+        resolved: dict[str, object] = {
+            "mode": "match-training",
+            "near_obstacle_probability": args.train_near_obstacle_probability,
+            "min_clearance_m": args.train_near_obstacle_min_clearance,
+            "max_clearance_m": args.train_near_obstacle_max_clearance,
+            "max_distance_m": args.train_goal_final_max_distance,
+            "min_altitude_m": args.train_goal_final_min_altitude,
+            "max_altitude_m": args.train_goal_final_max_altitude,
+            "side_clearance_only": args.train_goal_side_clearance_only,
+        }
+    elif args.eval_goal_mode == "hard":
+        resolved = {
+            "mode": "hard",
+            "near_obstacle_probability": args.train_near_obstacle_hard_probability,
+            "min_clearance_m": args.train_near_obstacle_hard_min_clearance,
+            "max_clearance_m": args.train_near_obstacle_hard_max_clearance,
+            "max_distance_m": args.train_goal_hard_max_distance,
+            "min_altitude_m": args.train_goal_hard_min_altitude,
+            "max_altitude_m": args.train_goal_hard_max_altitude,
+            "side_clearance_only": args.train_goal_side_clearance_only,
+        }
+    else:
+        resolved = {
+            "mode": "stress",
+            "near_obstacle_probability": 0.70,
+            "min_clearance_m": 2.0,
+            "max_clearance_m": 12.0,
+            "max_distance_m": None,
+            "min_altitude_m": None,
+            "max_altitude_m": None,
+            "side_clearance_only": False,
+        }
+
+    overrides = {
+        "near_obstacle_probability": args.eval_near_obstacle_probability,
+        "min_clearance_m": args.eval_near_obstacle_min_clearance,
+        "max_clearance_m": args.eval_near_obstacle_max_clearance,
+        "max_distance_m": args.eval_goal_max_distance,
+        "min_altitude_m": args.eval_goal_min_altitude,
+        "max_altitude_m": args.eval_goal_max_altitude,
+        "side_clearance_only": args.eval_goal_side_clearance_only,
+    }
+    for name, value in overrides.items():
+        if value is not None:
+            resolved[name] = value
+
+    probability = float(resolved["near_obstacle_probability"])
+    minimum = float(resolved["min_clearance_m"])
+    maximum = float(resolved["max_clearance_m"])
+    if not 0.0 <= probability <= 1.0:
+        raise ValueError("Evaluation near-obstacle probability must be in [0, 1].")
+    if minimum < 0.0 or maximum < minimum:
+        raise ValueError("Invalid evaluation goal clearance range.")
+    max_distance = resolved["max_distance_m"]
+    if max_distance is not None and (
+        not np.isfinite(max_distance) or max_distance < config.min_start_goal_distance
+    ):
+        raise ValueError("Evaluation goal maximum distance is invalid.")
+    altitude_min = resolved["min_altitude_m"]
+    altitude_max = resolved["max_altitude_m"]
+    if (altitude_min is None) != (altitude_max is None):
+        raise ValueError("Evaluation altitude minimum and maximum must be set together.")
+    if altitude_min is not None:
+        flyable_min = config.uav_radius
+        flyable_max = config.map_altitude - config.uav_radius
+        if (
+            not all(np.isfinite([altitude_min, altitude_max]))
+            or altitude_min < flyable_min
+            or altitude_max > flyable_max
+            or altitude_max < altitude_min
+        ):
+            raise ValueError(
+                f"Evaluation altitude must stay in [{flyable_min}, {flyable_max}] m."
+            )
+    return resolved
+
+
+# ==================== 最佳模型比较规则 ====================
 def pure_policy_validation_key(metrics: dict[str, object]) -> tuple[float, float, float, float]:
     """Rank checkpoints by rates so validation sets of different sizes remain comparable."""
     episodes = max(1, int(metrics.get("episodes", 1)))
@@ -588,8 +742,10 @@ def pure_policy_validation_key(metrics: dict[str, object]) -> tuple[float, float
     )
 
 
+# ==================== 完整训练、评估和导出主流程 ====================
 def main() -> None:
     """组织完整三维训练和评估流程。"""
+    # 1. 解析参数；--list-scenes 只打印场景信息，不启动训练。
     args = parse_args()
     if args.list_scenes:
         for key in available_scene_keys():
@@ -597,6 +753,7 @@ def main() -> None:
             print(f"{key}: {scene.display_name} ({scene.scene_name})")
         return
 
+    # 2. 固定随机性，并按场景隔离模型目录和本次运行结果目录。
     started = time.time()
     fix_seed(args.seed)
 
@@ -610,15 +767,18 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     run_output_dir = make_run_output_dir(output_dir)
 
+    # 3. 合并场景默认值和命令行覆盖项，得到最终训练/评估配置。
     config = make_config(args)
     apply_scene_training_defaults(args, scene.key, config)
     validate_scene_training_curriculum(args, config)
+    evaluation_goal_sampling = resolve_evaluation_goal_sampling(args, config)
     default_z = min(max(args.default_altitude, 1.0), config.map_altitude - 1.0)
     start = optional_point_3d(args.start_x, args.start_y, args.start_z, "start", default_z)
     if start is None:
         start = scene.default_start(config)
     goal = optional_point_3d(args.target_x, args.target_y, args.target_z, "target", default_z)
 
+    # 4. 运行开始前固化完整配置，便于日后复现实验和解释 checkpoint。
     run_metadata = {
         "scene_key": scene.key,
         "scene_display_name": scene.display_name,
@@ -641,6 +801,15 @@ def main() -> None:
                 args.train_goal_final_min_altitude,
                 args.train_goal_final_max_altitude,
             ],
+            "hard_probability": args.train_near_obstacle_hard_probability,
+            "hard_min_clearance_m": args.train_near_obstacle_hard_min_clearance,
+            "hard_max_clearance_m": args.train_near_obstacle_hard_max_clearance,
+            "hardening_episodes": args.train_near_obstacle_hardening_episodes,
+            "hard_max_distance_m": args.train_goal_hard_max_distance,
+            "hard_altitude_m": [
+                args.train_goal_hard_min_altitude,
+                args.train_goal_hard_max_altitude,
+            ],
             "side_clearance_only": args.train_goal_side_clearance_only,
         },
         "safe_action_mask": not args.disable_safe_action_mask,
@@ -650,11 +819,7 @@ def main() -> None:
             "best_checkpoint_path": str(save_best_model),
             "latest_checkpoint_interval": args.checkpoint_interval,
         },
-        "evaluation_goal_sampling": {
-            "near_obstacle_probability": args.eval_near_obstacle_probability,
-            "min_clearance_m": args.eval_near_obstacle_min_clearance,
-            "max_clearance_m": args.eval_near_obstacle_max_clearance,
-        },
+        "evaluation_goal_sampling": evaluation_goal_sampling,
         "config": config_to_dict(config),
     }
     if args.export_qgc_plan:
@@ -678,6 +843,7 @@ def main() -> None:
         encoding="utf-8",
     )
 
+    # 5. 环境决定状态/动作维度，智能体据此创建在线网络和目标网络。
     env = UAVPathPlanningEnv(config=config, seed=args.seed)
     agent = DQNAgent(
         state_dim=env.state_dim,
@@ -690,6 +856,7 @@ def main() -> None:
         device=args.device,
     )
 
+    # 输出本次运行的核心维度、场景、动力学、奖励和课程设置。
     print(
         f"state_dim={env.state_dim}, action_dim={env.num_actions}, "
         f"device={device_description(agent.device)}"
@@ -732,14 +899,31 @@ def main() -> None:
         f"near_obstacle_curriculum="
         f"{args.train_near_obstacle_start_probability:.0%}->"
         f"{args.train_near_obstacle_probability:.0%}/"
-        f"{args.train_near_obstacle_curriculum_episodes}ep, "
+        f"{args.train_near_obstacle_curriculum_episodes}ep -> "
+        f"{args.train_near_obstacle_hard_probability:.0%}/"
+        f"{args.train_near_obstacle_hardening_episodes}ep, "
         f"clearance={args.train_near_obstacle_start_min_clearance}-"
         f"{args.train_near_obstacle_start_max_clearance}m -> "
         f"{args.train_near_obstacle_min_clearance}-"
-        f"{args.train_near_obstacle_max_clearance}m, "
+        f"{args.train_near_obstacle_max_clearance}m -> "
+        f"{args.train_near_obstacle_hard_min_clearance}-"
+        f"{args.train_near_obstacle_hard_max_clearance}m/"
+        f"{args.train_near_obstacle_hardening_episodes}ep, "
         f"safe_action_mask={not args.disable_safe_action_mask}"
     )
+    print(
+        "evaluation="
+        f"mode={evaluation_goal_sampling['mode']}, "
+        f"near_obstacle={float(evaluation_goal_sampling['near_obstacle_probability']):.0%}, "
+        f"clearance={evaluation_goal_sampling['min_clearance_m']}-"
+        f"{evaluation_goal_sampling['max_clearance_m']}m, "
+        f"max_distance={evaluation_goal_sampling['max_distance_m']}, "
+        f"altitude={evaluation_goal_sampling['min_altitude_m']}-"
+        f"{evaluation_goal_sampling['max_altitude_m']}m, "
+        f"side_clearance_only={evaluation_goal_sampling['side_clearance_only']}"
+    )
 
+    # 6. 优先加载用户指定模型；否则在非 fresh-start 模式下自动续接场景模型。
     resume_model = args.load_model
     if resume_model is None and not args.fresh_start and save_model.exists():
         resume_model = save_model
@@ -749,6 +933,7 @@ def main() -> None:
     exploration_trained_episodes = 0
     effective_epsilon_start = args.epsilon_start
     if resume_model:
+        # 住宅区旧经验缺少可靠动作掩码，状态迁移时默认只保留网络权重。
         discard_residential_legacy_replay = (
             scene.key != "wujing_airfield" and not args.keep_legacy_replay
         )
@@ -763,6 +948,7 @@ def main() -> None:
         ):
             agent.replay_buffer.clear()
             checkpoint["replay_buffer_discarded"] = True
+        # 防止把其他场景或其他奖励版本的模型错误接入当前训练。
         checkpoint_scene_key = checkpoint.get("scene_key")
         checkpoint_config = checkpoint.get("config")
         checkpoint_scene_name = (
@@ -789,6 +975,7 @@ def main() -> None:
                 f"{checkpoint_reward_version}, but the current environment uses "
                 f"version {config.reward_shaping_version}. Start a new model with --fresh-start."
             )
+        # 分别恢复总训练、课程学习和探索率进度，保证续训曲线连续。
         trained_episodes = int(checkpoint.get("trained_episodes", 0))
         curriculum_trained_episodes = int(
             checkpoint.get("curriculum_trained_episodes", 0)
@@ -826,6 +1013,7 @@ def main() -> None:
         )
     print(f"Run outputs will be saved to {run_output_dir}")
 
+    # 记录续训起点，后续 callback 据此计算新增回合对应的绝对进度。
     resume_trained_episodes = trained_episodes
     resume_curriculum_episodes = curriculum_trained_episodes
     resume_exploration_episodes = exploration_trained_episodes
@@ -838,16 +1026,26 @@ def main() -> None:
         newly_completed = max(0, completed_episodes - resume_trained_episodes)
         return resume_exploration_episodes + newly_completed
 
+    # 7. 恢复历史最佳验证基线；评估分布变化时必须重新开始比较。
     best_validation_metrics = (
         checkpoint.get("best_validation_metrics")
         if resume_model and isinstance(checkpoint.get("best_validation_metrics"), dict)
         else None
     )
+    if isinstance(best_validation_metrics, dict) and (
+        best_validation_metrics.get("goal_sampling") != evaluation_goal_sampling
+    ):
+        print(
+            "Reset the best-validation comparison baseline because the evaluation "
+            "goal distribution changed; model weights and replay were kept."
+        )
+        best_validation_metrics = None
     if isinstance(best_validation_metrics, dict):
         best_validation_key = pure_policy_validation_key(best_validation_metrics)
     else:
         best_validation_key = (-1.0, -1.0, -float("inf"), -float("inf"))
 
+    # 汇总 checkpoint 附加元数据，供最新模型和最佳模型共同使用。
     def checkpoint_extra_state(completed_episodes: int) -> dict[str, object]:
         return {
             "trained_episodes": completed_episodes,
@@ -865,13 +1063,21 @@ def main() -> None:
             "train_near_obstacle_start_min_clearance": args.train_near_obstacle_start_min_clearance,
             "train_near_obstacle_start_max_clearance": args.train_near_obstacle_start_max_clearance,
             "train_near_obstacle_curriculum_episodes": args.train_near_obstacle_curriculum_episodes,
+            "train_near_obstacle_hard_probability": args.train_near_obstacle_hard_probability,
+            "train_near_obstacle_hard_min_clearance": args.train_near_obstacle_hard_min_clearance,
+            "train_near_obstacle_hard_max_clearance": args.train_near_obstacle_hard_max_clearance,
+            "train_near_obstacle_hardening_episodes": args.train_near_obstacle_hardening_episodes,
             "train_goal_start_max_distance": args.train_goal_start_max_distance,
             "train_goal_final_max_distance": args.train_goal_final_max_distance,
+            "train_goal_hard_max_distance": args.train_goal_hard_max_distance,
             "train_goal_start_min_altitude": args.train_goal_start_min_altitude,
             "train_goal_start_max_altitude": args.train_goal_start_max_altitude,
             "train_goal_final_min_altitude": args.train_goal_final_min_altitude,
             "train_goal_final_max_altitude": args.train_goal_final_max_altitude,
+            "train_goal_hard_min_altitude": args.train_goal_hard_min_altitude,
+            "train_goal_hard_max_altitude": args.train_goal_hard_max_altitude,
             "train_goal_side_clearance_only": args.train_goal_side_clearance_only,
+            "evaluation_goal_sampling": evaluation_goal_sampling,
             "safe_action_mask": not args.disable_safe_action_mask,
             "best_validation_metrics": best_validation_metrics,
             "seed": args.seed,
@@ -879,6 +1085,7 @@ def main() -> None:
             "rng_state": capture_rng_state(),
         }
 
+    # 独立验证环境避免训练环境状态影响固定种子纯策略验证。
     validation_env = UAVPathPlanningEnv(config=config, seed=args.seed + 100_000)
 
     def run_pure_policy_validation(completed_episodes: int, force: bool = False) -> None:
@@ -892,6 +1099,7 @@ def main() -> None:
             f"Starting pure-policy validation at episode {completed_episodes} "
             f"({args.validation_episodes} episodes, epsilon=0)..."
         )
+        # 纯策略验证固定 epsilon=0，并使用与最终评估一致的目标分布。
         validation_results, _ = evaluate_agent(
             env=validation_env,
             agent=agent,
@@ -899,9 +1107,21 @@ def main() -> None:
             start=start,
             goal=goal,
             seed=args.seed + 200_000,
-            near_obstacle_goal_probability=args.eval_near_obstacle_probability,
-            near_obstacle_goal_min_clearance=args.eval_near_obstacle_min_clearance,
-            near_obstacle_goal_max_clearance=args.eval_near_obstacle_max_clearance,
+            near_obstacle_goal_probability=float(
+                evaluation_goal_sampling["near_obstacle_probability"]
+            ),
+            near_obstacle_goal_min_clearance=float(
+                evaluation_goal_sampling["min_clearance_m"]
+            ),
+            near_obstacle_goal_max_clearance=float(
+                evaluation_goal_sampling["max_clearance_m"]
+            ),
+            goal_max_distance=evaluation_goal_sampling["max_distance_m"],
+            goal_altitude_min=evaluation_goal_sampling["min_altitude_m"],
+            goal_altitude_max=evaluation_goal_sampling["max_altitude_m"],
+            goal_near_obstacle_horizontal_only=bool(
+                evaluation_goal_sampling["side_clearance_only"]
+            ),
             use_safe_action_mask=not args.disable_safe_action_mask,
             verbose=False,
             show_progress=True,
@@ -920,6 +1140,7 @@ def main() -> None:
         avg_reward = float(
             np.mean([float(item["total_reward"]) for item in validation_results])
         )
+        # 最佳模型按成功率、低碰撞、成功步数和奖励的优先级比较。
         validation_metrics = {
             "episodes": args.validation_episodes,
             "successes": successes,
@@ -950,28 +1171,30 @@ def main() -> None:
                 "avg_success_steps": avg_success_steps,
                 "avg_reward": avg_reward,
                 "epsilon": 0.0,
-                "near_obstacle_probability": args.eval_near_obstacle_probability,
+                "goal_sampling": dict(evaluation_goal_sampling),
                 "seed": args.seed + 200_000,
             }
             save_best_model.parent.mkdir(parents=True, exist_ok=True)
-            agent.save(
+            saved_best_path = agent.save(
                 save_best_model,
                 config=config,
                 extra_state=checkpoint_extra_state(completed_episodes),
             )
-            print(f"Saved new pure-policy best model to {save_best_model}")
+            print(f"Saved new pure-policy best model to {saved_best_path}")
 
+    # 每回合结束后的统一钩子：按频率执行验证并保存可续训最新模型。
     def training_episode_end(completed_episodes: int) -> None:
         run_pure_policy_validation(completed_episodes)
         if args.checkpoint_interval and completed_episodes % args.checkpoint_interval == 0:
             save_model.parent.mkdir(parents=True, exist_ok=True)
-            agent.save(
+            saved_checkpoint_path = agent.save(
                 save_model,
                 config=config,
                 extra_state=checkpoint_extra_state(completed_episodes),
             )
-            print(f"Saved periodic latest checkpoint to {save_model}")
+            print(f"Saved periodic latest checkpoint to {saved_checkpoint_path}")
 
+    # 8. 执行训练；skip-train 时直接使用已加载或新建的网络进入评估。
     history = TrainHistory()
     if not args.skip_train and args.episodes > 0:
         if resume_model:
@@ -993,12 +1216,19 @@ def main() -> None:
             near_obstacle_goal_start_min_clearance=args.train_near_obstacle_start_min_clearance,
             near_obstacle_goal_start_max_clearance=args.train_near_obstacle_start_max_clearance,
             near_obstacle_goal_curriculum_episodes=args.train_near_obstacle_curriculum_episodes,
+            near_obstacle_goal_hard_probability=args.train_near_obstacle_hard_probability,
+            near_obstacle_goal_hard_min_clearance=args.train_near_obstacle_hard_min_clearance,
+            near_obstacle_goal_hard_max_clearance=args.train_near_obstacle_hard_max_clearance,
+            near_obstacle_goal_hardening_episodes=args.train_near_obstacle_hardening_episodes,
             goal_max_distance_start=args.train_goal_start_max_distance,
             goal_max_distance_final=args.train_goal_final_max_distance,
+            goal_max_distance_hard=args.train_goal_hard_max_distance,
             goal_altitude_start_min=args.train_goal_start_min_altitude,
             goal_altitude_start_max=args.train_goal_start_max_altitude,
             goal_altitude_final_min=args.train_goal_final_min_altitude,
             goal_altitude_final_max=args.train_goal_final_max_altitude,
+            goal_altitude_hard_min=args.train_goal_hard_min_altitude,
+            goal_altitude_hard_max=args.train_goal_hard_max_altitude,
             goal_near_obstacle_horizontal_only=args.train_goal_side_clearance_only,
             use_safe_action_mask=not args.disable_safe_action_mask,
             seed=args.seed,
@@ -1012,18 +1242,28 @@ def main() -> None:
         exploration_trained_episodes += args.episodes
         if trained_episodes % max(1, args.validation_interval) != 0:
             run_pure_policy_validation(trained_episodes, force=True)
+        # 训练结束后保存场景最新模型及本次运行目录快照。
         if save_model:
             save_model.parent.mkdir(parents=True, exist_ok=True)
             checkpoint_state = checkpoint_extra_state(trained_episodes)
-            agent.save(save_model, config=config, extra_state=checkpoint_state)
-            print(f"Saved model to {save_model}")
+            saved_model_path = agent.save(
+                save_model,
+                config=config,
+                extra_state=checkpoint_state,
+            )
+            print(f"Saved model to {saved_model_path}")
             run_model_path = run_output_dir / save_model.name
-            agent.save(run_model_path, config=config, extra_state=checkpoint_state)
-            print(f"Saved run model to {run_model_path}")
+            saved_run_model_path = agent.save(
+                run_model_path,
+                config=config,
+                extra_state=checkpoint_state,
+            )
+            print(f"Saved run model to {saved_run_model_path}")
 
         if not args.no_plots:
             plot_training(history, run_output_dir / "training_curve.png")
 
+    # 9. 在选定目标分布上执行最终纯策略评估，并返回其中最佳轨迹。
     results, best_trajectory = evaluate_agent(
         env=env,
         agent=agent,
@@ -1031,12 +1271,25 @@ def main() -> None:
         start=start,
         goal=goal,
         seed=args.seed,
-        near_obstacle_goal_probability=args.eval_near_obstacle_probability,
-        near_obstacle_goal_min_clearance=args.eval_near_obstacle_min_clearance,
-        near_obstacle_goal_max_clearance=args.eval_near_obstacle_max_clearance,
+        near_obstacle_goal_probability=float(
+            evaluation_goal_sampling["near_obstacle_probability"]
+        ),
+        near_obstacle_goal_min_clearance=float(
+            evaluation_goal_sampling["min_clearance_m"]
+        ),
+        near_obstacle_goal_max_clearance=float(
+            evaluation_goal_sampling["max_clearance_m"]
+        ),
+        goal_max_distance=evaluation_goal_sampling["max_distance_m"],
+        goal_altitude_min=evaluation_goal_sampling["min_altitude_m"],
+        goal_altitude_max=evaluation_goal_sampling["max_altitude_m"],
+        goal_near_obstacle_horizontal_only=bool(
+            evaluation_goal_sampling["side_clearance_only"]
+        ),
         use_safe_action_mask=not args.disable_safe_action_mask,
     )
 
+    # 10. 保存最佳轨迹，并独立复算全部安全、动力学和终点条件。
     if best_trajectory:
         save_trajectory_csv(best_trajectory, run_output_dir / "best_trajectory.csv")
         timed_trajectory = env.timed_trajectory()
@@ -1082,9 +1335,11 @@ def main() -> None:
             f"dynamics_consistent={validation.dynamics_consistent}, "
             f"goal_reached={validation.goal_reached}"
         )
+        # 只有用户启用且验证通过时，export_qgc_outputs 才会生成飞控任务。
         if args.export_qgc_plan:
             export_qgc_outputs(args, env, timed_trajectory, validation, run_output_dir)
 
+    # 11. 按绘图开关生成三维轨迹、动力学曲线和验证对比图。
     if (args.visualize or not args.no_plots) and best_trajectory:
         plot_trajectory(env, best_trajectory, run_output_dir / "best_trajectory.png")
         plot_trajectory_profiles(timed_trajectory, run_output_dir / "trajectory_profiles.png")

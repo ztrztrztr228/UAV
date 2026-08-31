@@ -13,6 +13,7 @@ from standalone_maps.spring_garden_phase2_map import SCENE as SPRING_SCENE
 from .config import BoxObstacle, UAVEnvConfig, wujing_airfield_obstacles
 
 
+# ==================== 可训练场景统一接口 ====================
 @dataclass(frozen=True)
 class TrainingScene:
     """训练入口使用的地图元数据。"""
@@ -72,6 +73,7 @@ class TrainingScene:
         return (self.default_start_xy[0], self.default_start_xy[1], config.uav_radius + 1e-3)
 
 
+# ==================== 住宅区地图到训练障碍物的适配 ====================
 def _scene_map_to_box_obstacles(scene: SceneMap, inflation: float) -> list[BoxObstacle]:
     """把旋转矩形建筑转换为保守的轴对齐包围盒。"""
     scene.validate()
@@ -94,6 +96,7 @@ def _scene_map_to_box_obstacles(scene: SceneMap, inflation: float) -> list[BoxOb
     return obstacles
 
 
+# 用原始 SceneMap 的元数据构造住宅区训练场景。
 def _from_scene_map(
     key: str,
     scene: SceneMap,
@@ -112,6 +115,7 @@ def _from_scene_map(
     )
 
 
+# ==================== 四个场景注册表 ====================
 SCENES: dict[str, TrainingScene] = {
     "wujing_airfield": TrainingScene(
         key="wujing_airfield",
@@ -129,6 +133,7 @@ SCENES: dict[str, TrainingScene] = {
 }
 
 
+# ==================== 场景查询接口 ====================
 def available_scene_keys() -> tuple[str, ...]:
     return tuple(SCENES)
 

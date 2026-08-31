@@ -14,6 +14,7 @@ from .environment import UAVPathPlanningEnv
 from .trajectory import TimedTrajectory
 
 
+# ==================== 轨迹验证结果 ====================
 @dataclass(frozen=True)
 class TrajectoryValidationResult:
     """Numerical checks comparing timed trajectory samples to the planned path."""
@@ -56,6 +57,7 @@ class TrajectoryValidationResult:
         return asdict(self)
 
 
+# ==================== 路径偏差几何计算 ====================
 def _as_points(points: Sequence[np.ndarray] | np.ndarray) -> np.ndarray:
     array = np.asarray(points, dtype=np.float64)
     if array.ndim != 2 or array.shape[1] != 3:
@@ -98,6 +100,7 @@ def trajectory_deviations(
     )
 
 
+# ==================== 边界与碰撞复查 ====================
 def _within_map_bounds(env: UAVPathPlanningEnv, point: np.ndarray) -> bool:
     radius = env.config.uav_radius
     return bool(np.all(point >= env.map_min + radius) and np.all(point <= env.map_max - radius))
@@ -138,6 +141,7 @@ def validate_timed_trajectory(
     if deviation_tolerance < 0.0:
         raise ValueError("deviation_tolerance must be non-negative.")
 
+    # 第一组检查：轨迹与参考折线的偏差、全轨迹碰撞和地图边界。
     deviations = trajectory_deviations(reference_path, trajectory)
     max_index = int(np.argmax(deviations)) if len(deviations) else 0
     collision_free = _trajectory_collision_free(env, trajectory)
@@ -163,6 +167,7 @@ def validate_timed_trajectory(
     ) <= 0.0:
         raise ValueError("Dynamics limits must be positive.")
 
+    # 第二组检查：用相邻时刻样本复算积分误差、jerk 和减速度。
     if len(trajectory.time) > 1:
         dt = np.diff(trajectory.time)
         if np.any(dt <= 0.0):
@@ -182,6 +187,7 @@ def validate_timed_trajectory(
     max_velocity_error = float(velocity_errors.max(initial=0.0))
     observed_max_jerk = float(jerk_values.max(initial=0.0))
     observed_max_deceleration = float(deceleration_values.max(initial=0.0))
+    # 第三组检查：把三维速度拆成水平、上升、下降和爬升角指标。
     horizontal_speeds = np.linalg.norm(trajectory.velocity[:, :2], axis=1)
     climb_speeds = np.maximum(trajectory.velocity[:, 2], 0.0)
     descent_speeds = np.maximum(-trajectory.velocity[:, 2], 0.0)
@@ -200,6 +206,7 @@ def validate_timed_trajectory(
     deceleration_ok = observed_max_deceleration <= deceleration_limit + integration_tolerance
     jerk_ok = observed_max_jerk <= jerk_limit + integration_tolerance
 
+    # 第四组检查：终点必须同时满足位置半径和末速度阈值。
     goal_point = env.goal if goal is None else np.asarray(goal, dtype=np.float64)
     radius = env.config.goal_radius if goal_radius is None else float(goal_radius)
     speed_tolerance = (
@@ -210,6 +217,7 @@ def validate_timed_trajectory(
     final_goal_distance = float(np.linalg.norm(trajectory.position[-1] - goal_point))
     final_speed = float(trajectory.speed[-1])
     goal_reached = final_goal_distance <= radius and final_speed <= speed_tolerance
+    # 任一安全、动力学或终点条件失败，整条轨迹即判定为不通过。
     passed = all(
         (
             max_deviation <= deviation_tolerance,
@@ -265,6 +273,7 @@ def validate_timed_trajectory(
     )
 
 
+# ==================== 验证结果持久化 ====================
 def save_validation_json(result: TrajectoryValidationResult, output_path: Path) -> None:
     """Save trajectory validation metrics to a JSON file."""
     output_path.parent.mkdir(parents=True, exist_ok=True)

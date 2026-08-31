@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 
+# ==================== 单栋旋转矩形建筑 ====================
 @dataclass(frozen=True)
 class Building:
     """带朝向的矩形建筑轮廓，坐标单位为米。"""
@@ -25,6 +26,7 @@ class Building:
 
     def footprint(self) -> tuple[tuple[float, float], ...]:
         """返回逆时针排列的四个二维角点。"""
+        # 先构造建筑自身坐标系中的四角，再按 yaw 旋转并平移到场景坐标。
         half_length = self.length / 2.0
         half_width = self.width / 2.0
         angle = math.radians(self.yaw_deg)
@@ -57,6 +59,7 @@ class Building:
         }
 
 
+# ==================== 完整局部 ENU 场景 ====================
 @dataclass(frozen=True)
 class SceneMap:
     """一个可独立检查和导出的局部 ENU 住宅区地图。"""
@@ -80,6 +83,7 @@ class SceneMap:
         return self.bounds[3] - self.bounds[1]
 
     def validate(self) -> None:
+        # 依次检查地图边界、建筑编号唯一性、尺寸和所有角点是否在场景内。
         xmin, ymin, xmax, ymax = self.bounds
         if not (xmin < xmax and ymin < ymax and self.max_altitude > 0.0):
             raise ValueError(f"Invalid scene bounds for {self.slug}.")
@@ -116,6 +120,7 @@ class SceneMap:
         }
 
 
+# ==================== 地图数据导出 ====================
 def save_scene(scene: SceneMap, output_dir: Path) -> tuple[Path, Path]:
     """保存场景参数 JSON 和局部坐标 GeoJSON。"""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -126,6 +131,7 @@ def save_scene(scene: SceneMap, output_dir: Path) -> tuple[Path, Path]:
     return json_path, geojson_path
 
 
+# ==================== 地图二维/三维预览 ====================
 def render_scene(scene: SceneMap, output_path: Path) -> None:
     """生成二维轮廓和三维挤出并列预览图。"""
     import matplotlib
@@ -142,6 +148,7 @@ def render_scene(scene: SceneMap, output_path: Path) -> None:
     ax3d = fig.add_subplot(122, projection="3d")
     xmin, ymin, xmax, ymax = scene.bounds
 
+    # 左图绘制旋转平面轮廓，右图把同一轮廓按建筑高度向上挤出。
     for index, building in enumerate(scene.buildings):
         footprint = building.footprint()
         color = "#64748b" if building.confidence == "medium" else "#94a3b8"

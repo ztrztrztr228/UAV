@@ -8,6 +8,7 @@ from pathlib import Path
 from standalone_maps.geometry import Building, SceneMap, render_scene, save_scene
 
 
+# ==================== 建筑尺寸模板 ====================
 BUILDING_TYPES = (
     (23.0, 15.0),
     (21.0, 17.0),
@@ -17,6 +18,7 @@ BUILDING_TYPES = (
 )
 
 
+# ==================== 单排弧形建筑生成 ====================
 def _curved_row(
     prefix: str,
     count: int,
@@ -28,6 +30,7 @@ def _curved_row(
 ) -> list[Building]:
     buildings: list[Building] = []
     span = x_end - x_start
+    # 用二次曲线确定中心位置，并用曲线斜率近似每栋建筑朝向。
     for index in range(count):
         ratio = 0.5 if count == 1 else index / (count - 1)
         normalized = ratio * 2.0 - 1.0
@@ -52,6 +55,7 @@ def _curved_row(
     return buildings
 
 
+# ==================== 兰香湖完整场景组装 ====================
 def build_scene() -> SceneMap:
     buildings: list[Building] = []
 
@@ -98,10 +102,12 @@ def build_scene() -> SceneMap:
     )
 
 
+# 模块导入时构建一次场景，训练适配器可直接复用。
 SCENE = build_scene()
 
 
 if __name__ == "__main__":
+    # 单独运行本文件时导出参数文件和预览图，不启动强化学习训练。
     output = Path("outputs/standalone_maps")
     save_scene(SCENE, output)
     render_scene(SCENE, output / f"{SCENE.slug}.png")

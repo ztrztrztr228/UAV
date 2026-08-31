@@ -85,8 +85,9 @@ python .\uav_drl_path_planning.py --scene spring_garden_phase2 --episodes 1500 -
 
 建筑附近目标采用分场景渐进课程。吴泾仍从 30%、15--30 m 净空逐步过渡到
 70%、2--12 m；三个住宅区从更容易的 10%、15--30 m 开始，在 2000 回合内逐步
-过渡到 50%、5--15 m。住宅区前期还会限制目标距离和高度，并只按建筑侧面净空
-采样，随后逐步放宽到整张地图，减少远距离、高楼顶目标导致的低速超时。新 checkpoint
+过渡到“标准层”50%、5--15 m，再用 2000 回合逐步提高到“困难层”70%、2--12 m。
+住宅区前期还会限制目标距离和高度，并只按建筑侧面净空采样；标准层放宽到整张地图，
+困难层继续扩展目标高度（Spring Garden Phase2 从最高 40 m 渐增至 60 m）。新 checkpoint
 会分别保存课程与探索进度。训练进度条中的 `near_goal` 表示最近 50 回合的实际建筑
 邻近目标比例，`curriculum` 表示当前设定概率，`safe` 表示当前可选动作比例，`speed`
 表示该回合平均飞行速度。
@@ -112,14 +113,29 @@ python .\uav_drl_path_planning.py --scene wujing_airfield --skip-train `
   --eval-episodes 50 --eval-near-obstacle-probability 0.0
 ```
 
-随机评估仍默认有 70% 的目标位于建筑外侧 2--12 m。可通过
+随机评估默认使用 `--eval-goal-mode match-training`，即固定采用训练课程的“标准层”，
+使测试与用于选最佳模型的验证具有相同且可重复的难度。使用 `--eval-goal-mode hard`
+可测试课程的最终困难层；使用 `--eval-goal-mode stress` 可恢复旧版的无限距离/高度、
+70% 建筑附近、2--12 m 三维净空压力测试。可通过
 `--eval-near-obstacle-min-clearance` 和
 `--eval-near-obstacle-max-clearance` 修改建筑净空范围。明确指定
 `--target-x/--target-y` 时固定目标优先，不再进行随机目标采样。
 课程终点可通过 `--train-near-obstacle-probability`、
 `--train-near-obstacle-min-clearance`、`--train-near-obstacle-max-clearance`
 修改；课程起点和时长使用对应的 `--train-near-obstacle-start-*` 和
-`--train-near-obstacle-curriculum-episodes` 修改。
+`--train-near-obstacle-curriculum-episodes` 修改；困难层和渐进时长使用对应的
+`--train-near-obstacle-hard-*` 与 `--train-near-obstacle-hardening-episodes` 修改。
+
+```powershell
+# Spring Garden Phase2：标准训练难度测试（默认）
+python .\uav_drl_path_planning.py --scene spring_garden_phase2 --skip-train --eval-episodes 50
+
+# 最终困难层 / 旧版压力测试
+python .\uav_drl_path_planning.py --scene spring_garden_phase2 --skip-train `
+  --eval-episodes 50 --eval-goal-mode hard
+python .\uav_drl_path_planning.py --scene spring_garden_phase2 --skip-train `
+  --eval-episodes 50 --eval-goal-mode stress
+```
 
 ### 在已有模型基础上继续训练
 

@@ -11,7 +11,8 @@ from typing import Sequence
 import numpy as np
 
 
-# MAVLink enum values used by QGroundControl Plan files.
+# ==================== QGC/MAVLink 常量 ====================
+# QGroundControl Plan 文件使用的 MAVLink 枚举值。
 MAV_AUTOPILOT_ARDUPILOTMEGA = 3
 MAV_AUTOPILOT_PX4 = 12
 MAV_TYPE_QUADROTOR = 2
@@ -27,11 +28,12 @@ FIRMWARE_TYPES = {
     "px4": MAV_AUTOPILOT_PX4,
 }
 
-# WGS-84 ellipsoid constants.
+# WGS-84 椭球常量，用于小范围 ENU 到经纬度的转换。
 _WGS84_A = 6_378_137.0
 _WGS84_E2 = 6.69437999014e-3
 
 
+# ==================== 输入与原点校验 ====================
 def _as_points(points: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
     array = np.asarray(points, dtype=np.float64)
     if array.ndim != 2 or array.shape[1] != 3 or len(array) == 0:
@@ -50,6 +52,7 @@ def _validate_wgs84_origin(latitude_deg: float, longitude_deg: float, altitude_a
         raise ValueError("WGS-84 origin longitude must be in [-180, 180].")
 
 
+# ==================== ENU 转 WGS-84 ====================
 def enu_to_wgs84(
     east_m: float,
     north_m: float,
@@ -87,6 +90,7 @@ def enu_to_wgs84(
     return latitude, longitude, altitude
 
 
+# ==================== 航迹抽稀与航段限长 ====================
 def _point_to_segment_distance(point: np.ndarray, start: np.ndarray, end: np.ndarray) -> float:
     segment = end - start
     length_sq = float(np.dot(segment, segment))
@@ -156,6 +160,7 @@ def prepare_qgc_waypoints(
     points = _as_points(trajectory_points)
     if not math.isfinite(takeoff_altitude_m) or takeoff_altitude_m <= 0.0:
         raise ValueError("takeoff_altitude_m must be positive and finite.")
+    # 去掉低于起飞高度的地面段，从首次达到起飞高度的位置开始生成航点。
     airborne = np.flatnonzero(points[:, 2] >= takeoff_altitude_m)
     if len(airborne) == 0:
         raise ValueError(
@@ -174,6 +179,7 @@ def prepare_qgc_waypoints(
     return takeoff_point, waypoints
 
 
+# ==================== QGC 任务项构造 ====================
 def _simple_position_item(
     command: int,
     sequence: int,
@@ -260,6 +266,7 @@ def build_qgc_plan(
         origin_altitude_amsl_m,
     )
 
+    # Home、起飞点和后续航点都以用户提供的 WGS-84 原点为基准转换。
     home_lat, home_lon, _ = enu_to_wgs84(
         home[0],
         home[1],
@@ -305,6 +312,7 @@ def build_qgc_plan(
                 acceptance_radius_m,
             )
         )
+    # 结束动作默认不添加；只有用户明确指定时才追加返航或降落。
     if end_action == "rtl":
         items.append(_terminal_item(MAV_CMD_NAV_RETURN_TO_LAUNCH, len(items) + 1))
     elif end_action == "land":
@@ -337,6 +345,7 @@ def build_qgc_plan(
     }
 
 
+# ==================== Plan 文件保存与自动加载路径 ====================
 def save_qgc_plan(plan: dict[str, object], output_path: Path) -> Path:
     """Write a QGC Plan atomically so QGC never observes a partial JSON file."""
     output_path = Path(output_path)

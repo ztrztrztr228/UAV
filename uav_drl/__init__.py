@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """无人机三维深度强化学习轨迹规划包。"""
 
+# 汇总常用公共接口，使外部代码可以直接从 uav_drl 包导入核心对象。
 from .actions import ACTION_DIRECTIONS, ACTION_NAMES, COAST_ACTION_INDEX, HOVER_ACTION_INDEX
 from .agent import DQNAgent
 from .config import DEFAULT_SEED, BoxObstacle, RectObstacle, UAVEnvConfig

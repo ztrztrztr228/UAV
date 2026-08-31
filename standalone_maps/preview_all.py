@@ -8,8 +8,10 @@ from standalone_maps.sanming_garden_map import SCENE as SANMING_SCENE
 from standalone_maps.spring_garden_phase2_map import SCENE as SPRING_SCENE
 
 
+# ==================== 三个住宅区批量导出入口 ====================
 def main() -> None:
     output = Path("outputs/standalone_maps")
+    # 每个场景分别输出 JSON、GeoJSON 和二维/三维预览 PNG。
     for scene in (VILLA_SCENE, SANMING_SCENE, SPRING_SCENE):
         json_path, geojson_path = save_scene(scene, output)
         preview_path = output / f"{scene.slug}.png"

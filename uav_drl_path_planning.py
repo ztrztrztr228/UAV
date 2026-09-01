@@ -57,6 +57,48 @@ from uav_drl.visualization import (
 )
 
 
+# 改变这些量会让已保存的状态归一化或 replay 奖励失效，不能静默续训。
+REPLAY_SENSITIVE_CONFIG_FIELDS = (
+    "lidar_range",
+    "lidar_resolution",
+    "progress_reward_scale",
+    "step_penalty",
+    "safety_risk_penalty_scale",
+    "jerk_penalty_scale",
+    "goal_reward",
+    "collision_penalty",
+    "timeout_penalty",
+)
+OUTPUT_NAMESPACE = "reward_v3_lidar40"
+
+
+def checkpoint_config_mismatches(
+    checkpoint_config: object,
+    config: UAVEnvConfig,
+) -> list[str]:
+    """Return replay-sensitive fields that differ from a saved checkpoint."""
+    if not isinstance(checkpoint_config, dict):
+        return []
+    mismatches: list[str] = []
+    for name in REPLAY_SENSITIVE_CONFIG_FIELDS:
+        if name not in checkpoint_config:
+            continue
+        saved = checkpoint_config[name]
+        current = getattr(config, name)
+        try:
+            matches = bool(np.isclose(float(saved), float(current), rtol=1e-9, atol=1e-12))
+        except (TypeError, ValueError):
+            matches = saved == current
+        if not matches:
+            mismatches.append(name)
+    return mismatches
+
+
+def scene_output_root(output_root: Path, scene_key: str) -> Path:
+    """Return the versioned output root without touching legacy scene outputs."""
+    return Path(output_root) / OUTPUT_NAMESPACE / scene_key
+
+
 # ==================== 命令行参数定义与校验 ====================
 def parse_args() -> argparse.Namespace:
     """定义命令行参数。"""
@@ -124,18 +166,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--raw-max-jerk", type=float, default=142.0, help="raw-log peak for reference")
     parser.add_argument("--goal-speed-tolerance", type=float, default=1.0)
     parser.add_argument("--smoothing-iterations", type=int, default=1)
+    parser.add_argument("--lidar-range", type=float, default=40.0, help="26-direction lidar range in metres")
+    parser.add_argument("--lidar-resolution", type=float, default=0.8, help="lidar ray sampling interval in metres")
 
-    # 轨迹形状奖励和导出轨迹与参考路径间的允许偏差。
-    reward_group = parser.add_argument_group("trajectory reward shaping")
-    reward_group.add_argument("--extra-altitude-penalty-scale", type=float, default=0.12)
-    reward_group.add_argument("--extra-altitude-margin", type=float, default=3.0)
-    reward_group.add_argument("--detour-penalty-scale", type=float, default=0.35)
-    reward_group.add_argument("--turn-penalty-scale", type=float, default=0.20)
-    reward_group.add_argument("--turn-speed-threshold", type=float, default=0.50)
-    reward_group.add_argument("--goal-guidance-distance", type=float, default=60.0)
-    reward_group.add_argument("--goal-altitude-penalty-scale", type=float, default=0.08)
-    reward_group.add_argument("--vertical-speed-guidance-scale", type=float, default=0.30)
-    reward_group.add_argument("--vertical-guidance-time", type=float, default=4.0)
+    # v3 归一化奖励和导出轨迹与参考路径间的允许偏差。
+    reward_group = parser.add_argument_group("normalized reward shaping")
+    reward_group.add_argument("--progress-reward-scale", type=float, default=1.0)
+    reward_group.add_argument("--step-penalty", type=float, default=0.01)
+    reward_group.add_argument("--safety-risk-penalty-scale", type=float, default=1.0)
+    reward_group.add_argument("--jerk-penalty-scale", type=float, default=0.02)
+    reward_group.add_argument("--goal-reward", type=float, default=50.0)
+    reward_group.add_argument("--collision-penalty", type=float, default=-50.0)
+    reward_group.add_argument("--timeout-penalty", type=float, default=-20.0)
     parser.add_argument(
         "--trajectory-deviation-tolerance",
         type=float,
@@ -213,7 +255,12 @@ def parse_args() -> argparse.Namespace:
     )
 
     # 输出目录、模型加载/保存、绘图和计算设备。
-    parser.add_argument("--output-root", type=Path, default=Path("outputs"))
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        default=Path("outputs"),
+        help=f"base output directory; v3 artifacts are stored below {OUTPUT_NAMESPACE}/<scene>",
+    )
     parser.add_argument("--output-dir", type=Path, help="override this scene's run-results directory")
     parser.add_argument("--save-model", type=Path, help="override this scene's checkpoint path")
     parser.add_argument("--save-best-model", type=Path, help="override pure-policy best checkpoint path")
@@ -375,15 +422,15 @@ def make_config(args: argparse.Namespace) -> UAVEnvConfig:
         raw_max_jerk=args.raw_max_jerk,
         goal_speed_tolerance=args.goal_speed_tolerance,
         smoothing_iterations=args.smoothing_iterations,
-        extra_altitude_penalty_scale=args.extra_altitude_penalty_scale,
-        extra_altitude_margin=args.extra_altitude_margin,
-        detour_penalty_scale=args.detour_penalty_scale,
-        turn_penalty_scale=args.turn_penalty_scale,
-        turn_speed_threshold=args.turn_speed_threshold,
-        goal_guidance_distance=args.goal_guidance_distance,
-        goal_altitude_penalty_scale=args.goal_altitude_penalty_scale,
-        vertical_speed_guidance_scale=args.vertical_speed_guidance_scale,
-        vertical_guidance_time=args.vertical_guidance_time,
+        lidar_range=args.lidar_range,
+        lidar_resolution=args.lidar_resolution,
+        progress_reward_scale=args.progress_reward_scale,
+        step_penalty=args.step_penalty,
+        safety_risk_penalty_scale=args.safety_risk_penalty_scale,
+        jerk_penalty_scale=args.jerk_penalty_scale,
+        goal_reward=args.goal_reward,
+        collision_penalty=args.collision_penalty,
+        timeout_penalty=args.timeout_penalty,
     )
 
 
@@ -758,9 +805,9 @@ def main() -> None:
     fix_seed(args.seed)
 
     scene = get_training_scene(args.scene)
-    scene_output_root = args.output_root / scene.key
-    output_dir: Path = args.output_dir or scene_output_root / "runs"
-    save_model: Path = args.save_model or scene_output_root / "models" / f"{scene.key}_dqn.pt"
+    versioned_scene_output_root = scene_output_root(args.output_root, scene.key)
+    output_dir: Path = args.output_dir or versioned_scene_output_root / "runs"
+    save_model: Path = args.save_model or versioned_scene_output_root / "models" / f"{scene.key}_dqn.pt"
     save_best_model: Path = args.save_best_model or save_model.with_name(
         f"{save_model.stem}_best{save_model.suffix}"
     )
@@ -780,6 +827,8 @@ def main() -> None:
 
     # 4. 运行开始前固化完整配置，便于日后复现实验和解释 checkpoint。
     run_metadata = {
+        "output_namespace": OUTPUT_NAMESPACE,
+        "versioned_scene_output_root": str(versioned_scene_output_root),
         "scene_key": scene.key,
         "scene_display_name": scene.display_name,
         "checkpoint_path": str(save_model),
@@ -885,13 +934,12 @@ def main() -> None:
     )
     print(
         f"reward_v{config.reward_shaping_version}="
-        f"extra_altitude={config.extra_altitude_penalty_scale}/m, "
-        f"altitude_margin={config.extra_altitude_margin}m, "
-        f"detour={config.detour_penalty_scale}/m, "
-        f"turn={config.turn_penalty_scale}/pi_rad, "
-        f"goal_altitude={config.goal_altitude_penalty_scale}/m, "
-        f"vertical_guidance={config.vertical_speed_guidance_scale}, "
-        f"guidance_distance={config.goal_guidance_distance}m"
+        f"progress={config.progress_reward_scale}x normalized, "
+        f"step=-{config.step_penalty}, "
+        f"safety={config.safety_risk_penalty_scale}, "
+        f"jerk={config.jerk_penalty_scale}, "
+        f"terminal=+{config.goal_reward}/{config.collision_penalty}/{config.timeout_penalty}, "
+        f"lidar={config.lidar_range}m@{config.lidar_resolution}m"
     )
     print(
         "training="
@@ -974,6 +1022,13 @@ def main() -> None:
                 f"Checkpoint {resume_model} uses reward shaping version "
                 f"{checkpoint_reward_version}, but the current environment uses "
                 f"version {config.reward_shaping_version}. Start a new model with --fresh-start."
+            )
+        config_mismatches = checkpoint_config_mismatches(checkpoint_config, config)
+        if config_mismatches:
+            names = ", ".join(config_mismatches)
+            raise ValueError(
+                f"Checkpoint {resume_model} differs in replay-sensitive configuration: "
+                f"{names}. Start a new model with --fresh-start."
             )
         # 分别恢复总训练、课程学习和探索率进度，保证续训曲线连续。
         trained_episodes = int(checkpoint.get("trained_episodes", 0))

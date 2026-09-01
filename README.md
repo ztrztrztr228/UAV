@@ -34,6 +34,19 @@ UAV_DRL_项目提纲.md             # 项目说明和报告提纲
 B01-B08 的高度暂假设为 15 m，B09-B10 暂假设为 25 m。这些数值来自公开
 影像估算和保守假设，只适用于算法仿真，不能直接用于真实飞行。
 
+### 导出到 Gazebo
+
+下面的命令会生成可直接启动的自包含 SDF world，以及可插入其他 world 的模型包：
+
+```powershell
+python -m gazebo_maps.export_wujing_gazebo
+```
+
+Gazebo Sim 使用 `gz sim gazebo/wujing_airfield/worlds/wujing_airfield.sdf` 启动。
+Gazebo Classic 11 请增加 `--sdf-version 1.7` 重新生成。详细的模型搜索路径配置和
+坐标注意事项见 `gazebo_maps/README.md`。默认导出原始建筑尺寸；如需把训练安全区
+做成实体碰撞体，可增加 `--inflation 8`。
+
 ## 安装依赖
 
 当前 `requirements.txt` 使用 CUDA 12.6 版 PyTorch，适用于本机 NVIDIA RTX 4060：
@@ -71,8 +84,9 @@ python .\uav_drl_path_planning.py --scene sanming_garden --episodes 1500 --eval-
 python .\uav_drl_path_planning.py --scene spring_garden_phase2 --episodes 1500 --eval-episodes 20 --visualize
 ```
 
-每个场景只会自动加载自己的 checkpoint。希望丢弃该场景旧模型并从头训练时，
-增加 `--fresh-start`。三个住宅区的旋转矩形建筑会保守转换成轴对齐包围盒，
+当前 v3 训练统一写入 `outputs/reward_v3_lidar40/<scene>/`，不会读取或覆盖原来位于
+`outputs/<scene>/` 的 v1/v2 模型。首次训练应增加 `--fresh-start`；之后每个场景只会
+在 v3 命名空间内自动加载自己的 checkpoint。三个住宅区的旋转矩形建筑会保守转换成轴对齐包围盒，
 默认外扩 2 m；吴泾试飞场仍使用 8 m 外扩量。可用 `--obstacle-inflation`
 覆盖当前场景的默认值。
 
@@ -94,8 +108,9 @@ python .\uav_drl_path_planning.py --scene spring_garden_phase2 --episodes 1500 -
 
 每 1000 回合默认运行 10 回合固定随机种子的纯策略验证（`epsilon=0`），按成功率、
 碰撞率、成功回合平均步数、平均奖励依次比较并保存最佳模型。每 100 回合另存一次
-可续训的最新 checkpoint，避免长时间 CPU 训练意外中断后损失进度。常规 checkpoint 保存到
-`<scene>_dqn.pt`，最佳模型单独保存到 `<scene>_dqn_best.pt`，不会相互覆盖。可用
+可续训的最新 checkpoint，避免长时间 CPU 训练意外中断后损失进度。网络权重和经验回放池
+保存在同一个 checkpoint 中。常规 checkpoint 保存到 v3 命名空间下的 `<scene>_dqn.pt`，
+最佳模型单独保存到 `<scene>_dqn_best.pt`，不会相互覆盖。可用
 `--validation-interval`、`--validation-episodes`、`--checkpoint-interval` 和
 `--save-best-model` 调整；将
 `--validation-interval` 设为 0 可关闭训练中验证。
@@ -139,53 +154,53 @@ python .\uav_drl_path_planning.py --scene spring_garden_phase2 --skip-train `
 
 ### 在已有模型基础上继续训练
 
-不加 `--fresh-start` 时会自动加载当前场景的 `<scene>_dqn.pt`。原先 46 维、但同属
-当前 v2 奖励版本的模型会自动扩展为 50 维：旧网络权重原样保留，新增 4 个提前制动
-输入以零权重开始学习。住宅区旧经验没有可靠的安全动作屏蔽记录，因此默认清空旧经验池，
-用较低的 0.05 探索率做适应性续训；吴泾现有 50 维模型仍照常恢复经验池。可用
-`--keep-legacy-replay` 强制保留旧经验，但不建议这样做。奖励函数没有改变，默认仍在
-CPU 上运行，例如：
+不加 `--fresh-start` 时会自动加载当前场景的 `<scene>_dqn.pt`。只有同属当前 v3 奖励、
+40 m 雷达配置的 checkpoint 才能安全续训。v1/v2 checkpoint 中的经验奖励无法自动重算，
+而且旧模型按 24 m 雷达量程解释状态，因此升级后必须使用 `--fresh-start` 重新训练：
 
 ```powershell
-python .\uav_drl_path_planning.py --scene lanxianghu_villa --episodes 1500 --eval-episodes 50
+python .\uav_drl_path_planning.py --scene lanxianghu_villa --episodes 5000 --eval-episodes 50 --fresh-start
 ```
 
-如果 checkpoint 来自 v1 奖励版本，其经验回放中的旧奖励无法自动重算，仍应使用
-`--fresh-start`；或者只迁移网络权重后丢弃旧回放池。
+之后由 v3 保存的 checkpoint 可以照常续训，不需要再次增加 `--fresh-start`。
 
 默认动力学参数来自飞行日志：最大水平速度 23.0 m/s、最大三维合速度
 23.18 m/s、最大上升速度 2.85 m/s、最大下降速度 1.65 m/s、最大爬升角
 90°、瞬时峰值加速度 15.5 m/s²、最大减速度 3.09 m/s²。正常飞行加速度
 采用给定 3--5 m/s² 区间的保守端 3.0 m/s²；Jerk 约束采用平滑后峰值
-78 m/s³，并保留原始日志峰值 142 m/s³ 作为参考。上述参数均可通过对应命令行参数覆盖。
+78 m/s³，并保留原始日志峰值 142 m/s³ 作为参考。26 方向雷达默认从 24 m 增加到
+40 m，采样分辨率仍为 0.8 m；可用 `--lidar-range` 和 `--lidar-resolution` 覆盖。
+上述参数均可通过对应命令行参数覆盖。
 
-## 轨迹形状奖励
+## v3 归一化奖励
 
-当前奖励版本为 v2，除了目标进度、碰撞和动力学奖励外，还包括：
+当前密集奖励只保留四个互不重复的分项：
 
-- `extra_altitude`：只惩罚高于起终点参考高度走廊和局部建筑安全越障高度的部分；
-- `detour`：惩罚航段长度中没有转化为目标进度的绕行距离；
-- `turn`：惩罚相邻速度方向的转角；
-- `goal_altitude`：接近目标时逐渐增强目标高度误差惩罚；
-- `vertical_speed_guidance`：引导垂直速度跟踪由剩余高度误差计算出的期望值，并在目标高度附近收敛到零。
+- `progress`：三维距离进度除以“最大速度 × 时间步”，再裁剪到 `[-1, 1]`；
+- `step`：很小的固定时间成本；
+- `safety_risk`：把安全半径和当前速度所需制动距离合并为一个连续风险；
+- `jerk`：唯一的动作平滑正则项。
+
+到达、碰撞和超时分别给 `+50`、`-50`、`-20`。单步进度默认最多为 `±1`，因此
+碰撞惩罚不会再被按米累计的进度奖励淹没。原来的距离、绕路、转角、速度方向、
+绝对/额外高度、目标高度、垂直速度、加速度、速度裁剪和悬停奖励均已移除；动力学
+限幅、碰撞检测和安全动作屏蔽仍作为硬约束保留。
 
 默认参数可以通过以下选项调整：
 
 ```text
---extra-altitude-penalty-scale 0.12
---extra-altitude-margin 3.0
---detour-penalty-scale 0.35
---turn-penalty-scale 0.20
---goal-guidance-distance 60.0
---goal-altitude-penalty-scale 0.08
---vertical-speed-guidance-scale 0.30
---vertical-guidance-time 4.0
+--progress-reward-scale 1.0
+--step-penalty 0.01
+--safety-risk-penalty-scale 1.0
+--jerk-penalty-scale 0.02
+--goal-reward 50.0
+--collision-penalty -50.0
+--timeout-penalty -20.0
 ```
 
 每一步 `info["reward_components"]` 会记录各奖励分项，
-`info["reward_diagnostics"]` 会记录参考高度、额外高度、转角、绕路距离和期望
-垂直速度。v1 checkpoint 的经验回放包含旧奖励，升级后必须使用
-`--fresh-start` 训练新模型。
+`info["reward_diagnostics"]` 会记录原始/归一化进度、净空、制动距离、安全风险和
+jerk 比例。v1/v2 checkpoint 升级后必须使用 `--fresh-start` 训练新模型。
 
 ## 指定三维起点和目标点
 
@@ -196,11 +211,57 @@ python .\uav_drl_path_planning.py --episodes 1500 --fresh-start --start-x 20 --s
 ## 加载模型进行规划
 
 ```powershell
-python .\uav_drl_path_planning.py --scene wujing_airfield --skip-train --load-model .\outputs\wujing_airfield\models\wujing_airfield_dqn.pt --start-x 20 --start-y 100 --start-z 8 --target-x 480 --target-y 260 --target-z 12 --visualize
+python .\uav_drl_path_planning.py --scene wujing_airfield --skip-train --load-model .\outputs\reward_v3_lidar40\wujing_airfield\models\wujing_airfield_dqn.pt --start-x 20 --start-y 100 --start-z 8 --target-x 480 --target-y 260 --target-z 12 --visualize
 ```
 
 建筑水平外扩量可通过 `--obstacle-inflation` 调整，例如设为 10 m。更换场景后
 应使用 `--fresh-start` 并重新训练，避免续载旧地图的模型和经验回放池。
+
+## 吴泾离线路径数据库
+
+`uav_offline_route_db.py` 会在吴泾建筑物外侧自动选择服务点，使用最佳 DQN 模型为
+每个点生成多条候选。第 1 次使用确定性贪心策略，其余候选使用可复现的小概率安全探索；
+只有成功到达、完整动力学验证通过、QGC 抽稀折线仍无碰撞的候选才参与比较。最终按
+飞行时间最短、路径长度次短、奖励再次优先的规则保存一条路线。默认每户尝试 10 次、
+安全探索率为 0.08，并生成 6 个住户服务点：
+
+```powershell
+python .\uav_offline_route_db.py build --resident-count 6
+```
+
+可调整每户候选数量和探索强度；固定 `--rollout-seed` 时重建结果可复现：
+
+```powershell
+python .\uav_offline_route_db.py build `
+  --resident-count 6 `
+  --route-attempts 20 `
+  --exploration-epsilon 0.08 `
+  --rollout-seed 2026
+```
+
+默认数据库为 `outputs/reward_v3_lidar40/wujing_airfield/offline_routes.sqlite`。每次构建先写入临时数据库，
+全部生成结束后再原子替换正式文件，查询不会读到半成品。列出可查询住户：
+
+```powershell
+python .\uav_offline_route_db.py list
+```
+
+查询一个住户时会直接在标准输出返回 QGC 航点；增加 `--output-plan` 可同时生成能在
+QGroundControl 中打开的 `.plan` 文件：
+
+```powershell
+python .\uav_offline_route_db.py query WJ-B01-E `
+  --origin-lat-wgs84 31.0000000 `
+  --origin-lon-wgs84 121.0000000 `
+  --origin-alt-amsl 6.0 `
+  --output-plan .\outputs\reward_v3_lidar40\wujing_airfield\WJ-B01-E.plan
+```
+
+示例原点必须替换为本地 ENU `(0,0,0)` 对应的现场实测 WGS-84 原点和 AMSL 海拔。
+数据库同时记录每户的生成次数、成功候选数、最终入选试次和全部成功候选的时间/长度/
+奖励摘要，便于追溯“为什么选中这条路线”。数据库故意不使用地图中的 GCJ-02 原点生成飞控坐标。输出的 `qgc_points` 包含任务序号、
+MAVLink 命令、WGS-84 经纬度和相对高度；完整 QGC Plan 同时包含起飞、航点以及用户
+显式指定的 `--end-action`。
 
 ## 导出并自动加载 QGroundControl 任务
 
@@ -219,7 +280,7 @@ QGC 导出是可选的，不会改变训练、评估或原有 CSV 输出。只�
 python .\uav_drl_path_planning.py `
   --scene wujing_airfield `
   --skip-train `
-  --load-model .\outputs\wujing_airfield\models\wujing_airfield_dqn.pt `
+  --load-model .\outputs\reward_v3_lidar40\wujing_airfield\models\wujing_airfield_dqn.pt `
   --start-x 20 --start-y 100 --start-z 8 `
   --target-x 480 --target-y 260 --target-z 12 `
   --export-qgc-plan `
@@ -244,22 +305,28 @@ PX4/ArduPilot SITL 中检查航点、高度基准、围栏和返航行为。
 
 ## 输出文件
 
-模型与运行结果按场景隔离：
+旧版输出继续保留在 `outputs/<scene>/`。当前 v3 模型、回放池和运行结果先按实验版本、
+再按场景隔离：
 
 ```text
 outputs/
-  wujing_airfield/
+  wujing_airfield/                       # 旧版，保持不动
     models/wujing_airfield_dqn.pt
-    runs/run_时间戳/
-  lanxianghu_villa/
-    models/lanxianghu_villa_dqn.pt
-    runs/run_时间戳/
-  sanming_garden/
-    models/sanming_garden_dqn.pt
-    runs/run_时间戳/
-  spring_garden_phase2/
-    models/spring_garden_phase2_dqn.pt
-    runs/run_时间戳/
+  reward_v3_lidar40/
+    wujing_airfield/
+      models/wujing_airfield_dqn.pt      # 含 v3 回放池
+      models/wujing_airfield_dqn_best.pt
+      offline_routes.sqlite
+      runs/run_时间戳/
+    lanxianghu_villa/
+      models/lanxianghu_villa_dqn.pt
+      runs/run_时间戳/
+    sanming_garden/
+      models/sanming_garden_dqn.pt
+      runs/run_时间戳/
+    spring_garden_phase2/
+      models/spring_garden_phase2_dqn.pt
+      runs/run_时间戳/
 ```
 
 每次运行目录中的重点文件包括：

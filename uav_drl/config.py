@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 
 import numpy as np
 
@@ -165,8 +165,9 @@ class UAVEnvConfig:
     # 安全距离半径，靠近建筑物或边界时扣分。
     safety_radius: float = 4.0
 
-    # 26 方向三维雷达探测距离和采样分辨率。
-    lidar_range: float = 24.0
+    # 26 方向三维雷达探测距离和采样分辨率。40 m 让常用飞行速度下的
+    # 制动风险更早进入状态，同时避免把扫描成本提高到最大制动距离对应的水平。
+    lidar_range: float = 40.0
     lidar_resolution: float = 0.8
 
     # 线段碰撞检测采样间隔。
@@ -175,35 +176,16 @@ class UAVEnvConfig:
     # 随机起点和目标点之间的最小三维距离。
     min_start_goal_distance: float = 35.0
 
-    # 奖励函数权重。
-    reward_shaping_version: int = 2
-    progress_reward_scale: float = 6.0
-    distance_penalty_scale: float = 0.25
-    step_penalty: float = 0.03
-    hover_penalty: float = 0.08
-    # 转弯按相邻速度方向夹角/π扣分；绕路按“航段长度-目标进度”米数扣分。
-    turn_penalty_scale: float = 0.20
-    turn_speed_threshold: float = 0.50
-    detour_penalty_scale: float = 0.35
-    proximity_penalty_scale: float = 1.0
-    # 保留极弱的绝对高度正则；主要使用相对合理高度走廊的额外高度惩罚。
-    altitude_penalty_scale: float = 0.01
-    extra_altitude_penalty_scale: float = 0.12
-    extra_altitude_margin: float = 3.0
-    # 接近目标后逐渐跟踪目标高度和合理垂直速度。
-    goal_guidance_distance: float = 60.0
-    goal_altitude_penalty_scale: float = 0.08
-    vertical_speed_guidance_scale: float = 0.30
-    vertical_guidance_time: float = 4.0
-    acceleration_penalty_scale: float = 0.06
-    jerk_penalty_scale: float = 0.04
-    speed_penalty_scale: float = 0.03
-    velocity_alignment_reward_scale: float = 0.12
-    braking_risk_penalty_scale: float = 2.0
-    speed_clip_penalty_scale: float = 0.5
-    goal_reward: float = 140.0
-    collision_penalty: float = -140.0
-    timeout_penalty: float = -30.0
+    # v3 奖励只保留四个密集项：归一化目标进度、时间成本、制动安全风险和 jerk。
+    # 进度先除以单步最大位移并裁剪到 [-1, 1]，因此终止奖惩不会再被米制进度淹没。
+    reward_shaping_version: int = 3
+    progress_reward_scale: float = 1.0
+    step_penalty: float = 0.01
+    safety_risk_penalty_scale: float = 1.0
+    jerk_penalty_scale: float = 0.02
+    goal_reward: float = 50.0
+    collision_penalty: float = -50.0
+    timeout_penalty: float = -20.0
 
     # 默认三维建筑物列表。
     obstacles: list[BoxObstacle] = field(default_factory=wujing_airfield_obstacles)
@@ -220,3 +202,25 @@ def config_to_dict(config: UAVEnvConfig) -> dict[str, object]:
     data = vars(config).copy()
     data["obstacles"] = [vars(obstacle).copy() for obstacle in config.obstacles]
     return data
+
+
+def config_from_dict(data: dict[str, object]) -> UAVEnvConfig:
+    """从 checkpoint 中保存的普通字典恢复环境配置。"""
+    if not isinstance(data, dict):
+        raise TypeError("config data must be a dictionary.")
+    allowed_names = {item.name for item in fields(UAVEnvConfig)}
+    values = {name: value for name, value in data.items() if name in allowed_names}
+    obstacle_values = values.get("obstacles")
+    if obstacle_values is not None:
+        if not isinstance(obstacle_values, (list, tuple)):
+            raise ValueError("config obstacles must be a list of box dictionaries.")
+        obstacles: list[BoxObstacle] = []
+        for item in obstacle_values:
+            if isinstance(item, BoxObstacle):
+                obstacles.append(item)
+            elif isinstance(item, dict):
+                obstacles.append(BoxObstacle(**item))
+            else:
+                raise ValueError("each config obstacle must be a box dictionary.")
+        values["obstacles"] = obstacles
+    return UAVEnvConfig(**values)

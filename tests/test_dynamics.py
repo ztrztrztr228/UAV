@@ -45,6 +45,8 @@ class DynamicsEnvironmentTests(unittest.TestCase):
         self.assertAlmostEqual(config.max_deceleration, 3.09)
         self.assertAlmostEqual(config.max_jerk, 78.0)
         self.assertAlmostEqual(config.raw_max_jerk, 142.0)
+        self.assertAlmostEqual(config.lidar_range, 40.0)
+        self.assertEqual(config.reward_shaping_version, 3)
 
     def test_velocity_projection_applies_horizontal_vertical_and_combined_limits(self) -> None:
         env = UAVPathPlanningEnv(UAVEnvConfig(obstacles=[]))
@@ -54,16 +56,6 @@ class DynamicsEnvironmentTests(unittest.TestCase):
         self.assertLessEqual(float(ascent[2]), 2.85 + 1e-6)
         self.assertLessEqual(float(np.linalg.norm(ascent)), 23.18 + 1e-6)
         self.assertGreaterEqual(float(descent[2]), -1.65 - 1e-6)
-
-    def test_extra_altitude_corridor_allows_local_obstacle_clearance(self) -> None:
-        obstacle = BoxObstacle(18.0, 8.0, 0.0, 22.0, 12.0, 15.0, "test_building")
-        env = UAVPathPlanningEnv(make_config(obstacles=[obstacle], extra_altitude_margin=3.0))
-        env.reset(start=(10, 10, 10), goal=(30, 10, 10))
-
-        open_position = np.asarray([10.0, 10.0, 20.0], dtype=np.float32)
-        over_building = np.asarray([20.0, 10.0, 20.0], dtype=np.float32)
-        self.assertAlmostEqual(env._allowed_route_altitude(open_position), 13.0, places=6)
-        self.assertAlmostEqual(env._allowed_route_altitude(over_building), 18.7, places=6)
 
     def test_evaluation_goal_can_be_sampled_near_a_building(self) -> None:
         obstacle = BoxObstacle(18.0, 8.0, 0.0, 22.0, 12.0, 15.0, "test_building")
@@ -146,35 +138,37 @@ class DynamicsEnvironmentTests(unittest.TestCase):
                 goal_near_obstacle_max_clearance=2.0,
             )
 
-    def test_route_shaping_reward_components_activate(self) -> None:
+    def test_normalized_reward_has_only_distinct_dense_components(self) -> None:
         env = UAVPathPlanningEnv(make_config(goal_radius=0.01, goal_speed_tolerance=0.0))
         env.reset(start=(10, 10, 10), goal=(30, 10, 15))
 
-        north = ACTION_NAMES.index("accelerate_north")
-        _, _, _, first_info = env.step(north)
-        first_components = first_info["reward_components"]
-        self.assertLess(first_components["detour"], 0.0)
-        self.assertLess(first_components["goal_altitude"], 0.0)
-        self.assertLess(first_components["vertical_speed_guidance"], 0.0)
-        self.assertGreater(first_info["reward_diagnostics"]["desired_vertical_speed"], 0.0)
-
         east = ACTION_NAMES.index("accelerate_east")
-        _, _, _, second_info = env.step(east)
-        self.assertLess(second_info["reward_components"]["turn"], 0.0)
+        _, _, _, info = env.step(east)
+        components = info["reward_components"]
+        self.assertEqual(set(components), {"progress", "step", "jerk", "safety_risk", "total"})
+        self.assertGreater(components["progress"], 0.0)
+        self.assertLessEqual(abs(components["progress"]), env.config.progress_reward_scale)
 
-        env.position = np.asarray([20.0, 10.0, 22.0], dtype=np.float32)
-        env.velocity = np.zeros(3, dtype=np.float32)
+        env.position = np.asarray([1.0, 10.0, 10.0], dtype=np.float32)
+        env.velocity = np.asarray([env.config.max_speed, 0.0, 0.0], dtype=np.float32)
         env.acceleration = np.zeros(3, dtype=np.float32)
         env._shaped_reward(
-            ACTION_NAMES.index("coast"),
-            progress=0.0,
-            distance=env.distance_to_goal(),
-            previous_velocity=np.zeros(3, dtype=np.float32),
+            progress=100.0,
             previous_acceleration=np.zeros(3, dtype=np.float32),
-            segment_length=0.0,
-            clipped_speed=0.0,
         )
-        self.assertLess(env.last_reward_components["extra_altitude"], 0.0)
+        self.assertAlmostEqual(env.last_reward_components["progress"], 1.0)
+        self.assertLess(env.last_reward_components["safety_risk"], 0.0)
+        self.assertGreater(env.last_reward_diagnostics["safety_risk"], 0.0)
+
+    def test_collision_penalty_dominates_one_step_progress(self) -> None:
+        env = UAVPathPlanningEnv(make_config())
+        env.reset(start=(0.71, 10.0, 10.0), goal=(30.0, 10.0, 10.0))
+        _, reward, done, info = env.step(ACTION_NAMES.index("accelerate_west"))
+
+        self.assertTrue(done)
+        self.assertEqual(info["event"], "collision")
+        self.assertEqual(reward, env.config.collision_penalty)
+        self.assertGreater(abs(reward), env.config.progress_reward_scale)
 
     def test_wujing_building_estimates_are_inflated_and_height_assumptions_applied(self) -> None:
         obstacles = wujing_airfield_obstacles(inflation=8.0)
